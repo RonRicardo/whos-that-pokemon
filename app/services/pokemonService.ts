@@ -107,15 +107,22 @@ export const getRandomPokemonId = (mode: GameMode): number => {
   return Math.floor(Math.random() * maxId) + 1;
 };
 
-export const getRandomPokemonIds = (mode: GameMode, count: number): number[] => {
+export const getRandomPokemonIds = (mode: GameMode, count: number, excludeIds: Set<number> = new Set()): number[] => {
   const maxId = mode === 'classic' ? CLASSIC_MAX_POKEMON_ID : MAX_POKEMON_ID;
   const ids = new Set<number>();
+  let attempts = 0;
+  const MAX_ATTEMPTS = 25; // Prevent infinite loops
   
-  while (ids.size < count) {
+  while (ids.size < count && attempts < MAX_ATTEMPTS) {
     const newId = Math.floor(Math.random() * maxId) + 1;
-    if (!ids.has(newId)) {
+    if (!ids.has(newId) && !excludeIds.has(newId)) {
       ids.add(newId);
     }
+    attempts++;
+  }
+
+  if (ids.size < count) {
+    throw new Error('Could not find enough unique Pokemon IDs');
   }
   
   return Array.from(ids);
@@ -167,11 +174,12 @@ export const fetchRandomPokemon = async (mode: GameMode = 'modern'): Promise<Pok
 
 export const fetchRandomPokemonWithChoices = async (
   mode: GameMode = 'modern',
-  choiceCount: number = 3
+  choiceCount: number = 3,
+  excludeIds: Set<number> = new Set()
 ): Promise<{ correct: Pokemon; choices: Pokemon[] }> => {
   try {
     // Get random IDs for all choices
-    const ids = getRandomPokemonIds(mode, choiceCount);
+    const ids = getRandomPokemonIds(mode, choiceCount, excludeIds);
     
     // Fetch all Pokemon
     const pokemons = await fetchMultiplePokemon(ids);
