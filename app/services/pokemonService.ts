@@ -29,7 +29,10 @@ export const getRandomPokemonIds = (mode: GameMode, count: number): number[] => 
   const ids = new Set<number>();
   
   while (ids.size < count) {
-    ids.add(Math.floor(Math.random() * maxId) + 1);
+    const newId = Math.floor(Math.random() * maxId) + 1;
+    if (!ids.has(newId)) {
+      ids.add(newId);
+    }
   }
   
   return Array.from(ids);
@@ -52,7 +55,13 @@ export const fetchPokemon = async (id: number): Promise<Pokemon> => {
 };
 
 export const fetchMultiplePokemon = async (ids: number[]): Promise<Pokemon[]> => {
-  return Promise.all(ids.map(id => fetchPokemon(id)));
+  try {
+    const pokemons = await Promise.all(ids.map(id => fetchPokemon(id)));
+    return pokemons;
+  } catch (error) {
+    console.error('Error fetching multiple Pokemon:', error);
+    throw error;
+  }
 };
 
 export const fetchRandomPokemon = async (mode: GameMode = 'modern'): Promise<Pokemon> => {
@@ -64,16 +73,33 @@ export const fetchRandomPokemonWithChoices = async (
   mode: GameMode = 'modern',
   choiceCount: number = 3
 ): Promise<{ correct: Pokemon; choices: Pokemon[] }> => {
-  // Get random IDs for all choices
-  const ids = getRandomPokemonIds(mode, choiceCount);
-  const pokemons = await fetchMultiplePokemon(ids);
-  
-  // Randomly select one as the correct answer
-  const correctIndex = Math.floor(Math.random() * pokemons.length);
-  const correct = pokemons[correctIndex];
-  
-  return {
-    correct,
-    choices: pokemons
-  };
+  try {
+    // Get random IDs for all choices
+    const ids = getRandomPokemonIds(mode, choiceCount);
+    
+    // Fetch all Pokemon
+    const pokemons = await fetchMultiplePokemon(ids);
+    
+    // Randomly select one as the correct answer
+    const correctIndex = Math.floor(Math.random() * pokemons.length);
+    const correct = pokemons[correctIndex];
+
+    // Ensure the correct Pokemon is included in the choices
+    const choices = [...pokemons];
+    
+    console.log('Fetched Pokemon choices:', {
+      ids,
+      correctIndex,
+      correctPokemon: correct.name,
+      allChoices: choices.map(p => p.name)
+    });
+
+    return {
+      correct,
+      choices
+    };
+  } catch (error) {
+    console.error('Error in fetchRandomPokemonWithChoices:', error);
+    throw error;
+  }
 }; 

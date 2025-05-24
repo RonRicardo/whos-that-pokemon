@@ -11,6 +11,7 @@ import {
   type Difficulty 
 } from '../services/pokemonService';
 import Modal from './Modal';
+import GameSummaryModal from './GameSummaryModal';
 
 interface GameState {
   pokemon: Pokemon | null;
@@ -19,6 +20,7 @@ interface GameState {
   userGuess: string;
   timeLeft: number;
   score: number;
+  highScore: number;
   guessesLeft: number;
   isWrongGuess: boolean;
   hint: string;
@@ -28,6 +30,8 @@ interface GameState {
   choices: Pokemon[];
   incorrectGuesses: Set<string>;
   shakingGuess: string | null;
+  correctGuesses: Pokemon[];
+  roundsPlayed: number;
 }
 
 interface ModeSwitchModal {
@@ -39,6 +43,7 @@ interface ModeSwitchModal {
 const GAME_DURATION = 30; // seconds
 const NORMAL_MODE_GUESSES = 3;
 const EASY_MODE_GUESSES = 2;
+const ROUNDS_PER_GAME = 5;
 
 export default function PokemonGame() {
   const getInitialGuesses = (difficulty: Difficulty) => {
@@ -52,6 +57,7 @@ export default function PokemonGame() {
     userGuess: '',
     timeLeft: GAME_DURATION,
     score: 0,
+    highScore: 0,
     guessesLeft: NORMAL_MODE_GUESSES,
     isWrongGuess: false,
     hint: '',
@@ -60,7 +66,9 @@ export default function PokemonGame() {
     showConfetti: false,
     choices: [],
     incorrectGuesses: new Set(),
-    shakingGuess: null
+    shakingGuess: null,
+    correctGuesses: [],
+    roundsPlayed: 0
   });
 
   const [modeSwitchModal, setModeSwitchModal] = useState<ModeSwitchModal>({
@@ -68,6 +76,8 @@ export default function PokemonGame() {
     targetMode: null,
     targetDifficulty: null
   });
+
+  const [showSummary, setShowSummary] = useState(false);
 
   const [windowSize, setWindowSize] = useState({
     width: typeof window !== 'undefined' ? window.innerWidth : 0,
@@ -97,11 +107,19 @@ export default function PokemonGame() {
 
     if (!gameState.isRevealed && gameState.timeLeft > 0 && !gameState.isLoading) {
       timer = setInterval(() => {
-        setGameState(prev => ({
-          ...prev,
-          timeLeft: prev.timeLeft - 1,
-          isRevealed: prev.timeLeft - 1 <= 0
-        }));
+        setGameState(prev => {
+          const newTimeLeft = prev.timeLeft - 1;
+          const timeIsUp = newTimeLeft <= 0;
+          
+          return {
+            ...prev,
+            timeLeft: newTimeLeft,
+            isRevealed: timeIsUp,
+            ...(timeIsUp && {
+              roundsPlayed: prev.roundsPlayed + 1
+            })
+          };
+        });
       }, 1000);
     }
 
@@ -122,17 +140,30 @@ export default function PokemonGame() {
   };
 
   const loadNewPokemon = async () => {
+    // Don't load new Pokemon if the game is complete
+    if (gameState.roundsPlayed >= ROUNDS_PER_GAME) {
+      return;
+    }
+
+    setGameState(prev => ({ ...prev, isLoading: true }));
+    
     try {
       if (gameState.difficulty === 'easy') {
-        let result;
-        do {
+        let result: { correct: Pokemon; choices: Pokemon[] };
+        let validChoices = false;
+        
+        while (!validChoices) {
           result = await fetchRandomPokemonWithChoices(gameState.mode);
-        } while (!result.correct.sprites.front_default || !result.correct.sprites.back_default);
-
-        console.log('Loading Pokemon with choices:', {
-          correct: result.correct.name,
-          choices: result.choices.map(c => c.name)
-        });
+          // Check if all Pokemon in choices (including correct) have both sprites
+          validChoices = result.choices.every(pokemon => 
+            pokemon.sprites.front_default && pokemon.sprites.back_default
+          );
+          console.log('Fetched result:', {
+            correct: result.correct.name,
+            choices: result.choices.map(c => c.name),
+            validChoices
+          });
+        }
 
         setGameState(prev => ({
           ...prev,
@@ -181,13 +212,27 @@ export default function PokemonGame() {
     const isCorrect = guess.toLowerCase() === gameState.pokemon.name.toLowerCase();
     
     if (isCorrect) {
+      const newScore = gameState.score + Math.ceil((gameState.timeLeft + gameState.guessesLeft * 5) / 2);
+      const newHighScore = Math.max(newScore, gameState.highScore);
+      const newCorrectGuesses = [...gameState.correctGuesses, gameState.pokemon];
+      const newRoundsPlayed = gameState.roundsPlayed + 1;
+
       setGameState(prev => ({
         ...prev,
         isRevealed: true,
-        score: prev.score + Math.ceil((prev.timeLeft + prev.guessesLeft * 5) / 2),
+        score: newScore,
+        highScore: newHighScore,
         showConfetti: true,
-        shakingGuess: null
+        shakingGuess: null,
+        correctGuesses: newCorrectGuesses,
+        roundsPlayed: newRoundsPlayed
       }));
+
+      if (newRoundsPlayed === ROUNDS_PER_GAME) {
+        setTimeout(() => {
+          setShowSummary(true);
+        }, 1500); // Show summary after confetti
+      }
 
       setTimeout(() => {
         setGameState(prev => ({ ...prev, showConfetti: false }));
@@ -205,8 +250,17 @@ export default function PokemonGame() {
         hint: newGuessesLeft === 1 ? getHint(gameState.pokemon!.name) : '',
         isRevealed: newGuessesLeft === 0,
         incorrectGuesses: newIncorrectGuesses,
-        shakingGuess: guess
+        shakingGuess: guess,
+        ...(newGuessesLeft === 0 && {
+          roundsPlayed: prev.roundsPlayed + 1
+        })
       }));
+
+      if (newGuessesLeft === 0 && gameState.roundsPlayed + 1 === ROUNDS_PER_GAME) {
+        setTimeout(() => {
+          setShowSummary(true);
+        }, 1500);
+      }
 
       setTimeout(() => {
         setGameState(prev => ({ ...prev, shakingGuess: null }));
@@ -241,10 +295,6 @@ export default function PokemonGame() {
   };
 
   const resetGameState = (newMode: GameMode, newDifficulty: Difficulty) => {
-    // First clear any existing timers by setting isRevealed to true
-    setGameState(prev => ({ ...prev, isRevealed: true }));
-
-    // Then reset the entire game state
     setGameState({
       pokemon: null,
       isLoading: true,
@@ -252,6 +302,7 @@ export default function PokemonGame() {
       userGuess: '',
       timeLeft: GAME_DURATION,
       score: 0,
+      highScore: gameState.highScore,
       guessesLeft: getInitialGuesses(newDifficulty),
       isWrongGuess: false,
       hint: '',
@@ -260,7 +311,9 @@ export default function PokemonGame() {
       showConfetti: false,
       choices: [],
       incorrectGuesses: new Set(),
-      shakingGuess: null
+      shakingGuess: null,
+      correctGuesses: [],
+      roundsPlayed: 0
     });
   };
 
@@ -276,6 +329,27 @@ export default function PokemonGame() {
     return inProgress;
   };
 
+  const handleShare = (username: string) => {
+    // Create a sharable text summary
+    const summary = `
+🎮 Pokemon Guessing Game Results 🎮
+Trainer: ${username}
+High Score: ${gameState.highScore}
+Mode: ${gameState.mode === 'classic' ? 'Classic (Gen 1)' : 'Modern'} - ${gameState.difficulty === 'easy' ? 'Easy' : 'Normal'}
+Correctly Guessed Pokemon (${gameState.correctGuesses.length}/${ROUNDS_PER_GAME}):
+${gameState.correctGuesses.map(p => p.name.charAt(0).toUpperCase() + p.name.slice(1)).join(', ')}
+Play now at [your-game-url]!
+    `.trim();
+
+    // Copy to clipboard
+    navigator.clipboard.writeText(summary).then(() => {
+      alert('Summary copied to clipboard! Share it with your friends!');
+    }).catch(() => {
+      alert('Failed to copy to clipboard. Please copy the text manually.');
+      console.log(summary);
+    });
+  };
+
   if (gameState.isLoading || !gameState.pokemon) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -286,8 +360,9 @@ export default function PokemonGame() {
 
   console.log('Current game state:', {
     difficulty: gameState.difficulty,
-    choices: gameState.choices.map(c => c.name),
-    mode: gameState.mode
+    mode: gameState.mode,
+    hasChoices: gameState.choices.length > 0,
+    choiceNames: gameState.choices.map(c => c.name)
   });
 
   return (
@@ -303,6 +378,19 @@ export default function PokemonGame() {
         message="Switching game modes will reset your current score and start a new game. Are you sure you want to continue?"
         confirmText="Switch Mode"
         cancelText="Keep Playing"
+      />
+
+      <GameSummaryModal
+        isOpen={showSummary}
+        onClose={() => {
+          setShowSummary(false);
+          resetGameState(gameState.mode, gameState.difficulty);
+          loadNewPokemon();
+        }}
+        correctGuesses={gameState.correctGuesses}
+        highScore={gameState.highScore}
+        onShare={handleShare}
+        totalRounds={ROUNDS_PER_GAME}
       />
 
       <div className="flex flex-col items-center gap-6">
@@ -394,6 +482,9 @@ export default function PokemonGame() {
           <div className="text-lg font-bold text-custom-rose">
             Guesses Left: {gameState.guessesLeft}
           </div>
+          <div className="text-lg font-bold text-custom-brown">
+            Round: {gameState.roundsPlayed + 1}/{ROUNDS_PER_GAME}
+          </div>
         </div>
 
         {gameState.hint && (
@@ -407,12 +498,26 @@ export default function PokemonGame() {
             <div className="text-2xl font-bold text-custom-brown">
               It&apos;s {formatPokemonName(gameState.pokemon.name)}!
             </div>
-            <button
-              onClick={loadNewPokemon}
-              className="bg-custom-teal hover:bg-opacity-90 text-white font-bold py-2 px-6 rounded-full transition-all"
-            >
-              Next Pokemon
-            </button>
+            {gameState.roundsPlayed < ROUNDS_PER_GAME ? (
+              <button
+                onClick={loadNewPokemon}
+                className="bg-custom-teal hover:bg-opacity-90 text-white font-bold py-2 px-6 rounded-full transition-all"
+              >
+                Next Pokemon
+              </button>
+            ) : (
+              <div className="flex flex-col items-center gap-4">
+                <div className="text-lg text-custom-brown">
+                  Game Complete! Check your summary to see how well you did.
+                </div>
+                <button
+                  onClick={() => setShowSummary(true)}
+                  className="bg-custom-rose hover:bg-opacity-90 text-white font-bold py-2 px-6 rounded-full transition-all"
+                >
+                  View Summary
+                </button>
+              </div>
+            )}
           </div>
         ) : gameState.difficulty === 'easy' ? (
           <div className="grid grid-cols-1 gap-4 w-full max-w-md">
@@ -432,7 +537,7 @@ export default function PokemonGame() {
                   >
                     {formatPokemonName(choice.name)}
                   </button>
-                )
+                );
               })
             ) : (
               <div className="text-center text-custom-brown">Loading choices...</div>
