@@ -1,6 +1,47 @@
 const POKEMON_API_BASE_URL = 'https://pokeapi.co/api/v2';
 const MAX_POKEMON_ID = 1025;
 const CLASSIC_MAX_POKEMON_ID = 151;
+const CACHE_EXPIRATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+
+interface CacheEntry {
+  data: Pokemon;
+  timestamp: number;
+}
+
+function getCachedPokemon(id: number): Pokemon | null {
+  try {
+    const cacheKey = `pokemon_${id}`;
+    const cached = localStorage.getItem(cacheKey);
+    
+    if (!cached) return null;
+    
+    const entry: CacheEntry = JSON.parse(cached);
+    const now = Date.now();
+    
+    if (now - entry.timestamp > CACHE_EXPIRATION) {
+      localStorage.removeItem(cacheKey);
+      return null;
+    }
+    
+    return entry.data;
+  } catch (error) {
+    console.warn('Error reading from cache:', error);
+    return null;
+  }
+}
+
+function cachePokemon(id: number, data: Pokemon): void {
+  try {
+    const cacheKey = `pokemon_${id}`;
+    const entry: CacheEntry = {
+      data,
+      timestamp: Date.now()
+    };
+    localStorage.setItem(cacheKey, JSON.stringify(entry));
+  } catch (error) {
+    console.warn('Error writing to cache:', error);
+  }
+}
 
 export interface Pokemon {
   id: number;
@@ -40,6 +81,15 @@ export const getRandomPokemonIds = (mode: GameMode, count: number): number[] => 
 
 export const fetchPokemon = async (id: number): Promise<Pokemon> => {
   try {
+    // Check cache first
+    const cached = getCachedPokemon(id);
+    if (cached) {
+      console.log(`Using cached data for Pokemon #${id}`);
+      return cached;
+    }
+
+    // If not in cache, fetch from API
+    console.log(`Fetching Pokemon #${id} from API`);
     const response = await fetch(`${POKEMON_API_BASE_URL}/pokemon/${id}`);
     
     if (!response.ok) {
@@ -47,6 +97,10 @@ export const fetchPokemon = async (id: number): Promise<Pokemon> => {
     }
 
     const data = await response.json();
+    
+    // Cache the result
+    cachePokemon(id, data);
+    
     return data;
   } catch (error) {
     console.error('Error fetching Pokemon:', error);
