@@ -338,7 +338,7 @@ High Score: ${gameState.highScore}
 Mode: ${gameState.mode === 'classic' ? 'Classic (Gen 1)' : 'Modern'} - ${gameState.difficulty === 'easy' ? 'Easy' : 'Normal'}
 Correctly Guessed Pokemon (${gameState.correctGuesses.length}/${ROUNDS_PER_GAME}):
 ${gameState.correctGuesses.map(p => p.name.charAt(0).toUpperCase() + p.name.slice(1)).join(', ')}
-Play now at [your-game-url]!
+Try to beat my score at https://whos-that-pokemon-gold.vercel.app/ !
     `.trim();
 
     // Copy to clipboard
