@@ -129,7 +129,10 @@ export default function PokemonGame() {
           result = await fetchRandomPokemonWithChoices(gameState.mode);
         } while (!result.correct.sprites.front_default || !result.correct.sprites.back_default);
 
-        console.log('Loaded Pokemon with choices:', result);
+        console.log('Loading Pokemon with choices:', {
+          correct: result.correct.name,
+          choices: result.choices.map(c => c.name)
+        });
 
         setGameState(prev => ({
           ...prev,
@@ -281,6 +284,12 @@ export default function PokemonGame() {
     );
   }
 
+  console.log('Current game state:', {
+    difficulty: gameState.difficulty,
+    choices: gameState.choices.map(c => c.name),
+    mode: gameState.mode
+  });
+
   return (
     <>
       <Modal
@@ -407,23 +416,27 @@ export default function PokemonGame() {
           </div>
         ) : gameState.difficulty === 'easy' ? (
           <div className="grid grid-cols-1 gap-4 w-full max-w-md">
-            {gameState.choices.map((choice) => {
-              const isIncorrect = gameState.incorrectGuesses.has(choice.name);
-              const isShaking = choice.name === gameState.shakingGuess;
-              return (
-                <button
-                  key={choice.id}
-                  onClick={() => handleGuess(choice.name)}
-                  className={`w-full px-6 py-3 rounded-full transition-all text-lg font-bold
-                    ${isIncorrect ? 'bg-gray-400 hover:bg-gray-400 text-gray-600' : 'bg-custom-teal hover:bg-opacity-90 text-white'}
-                    ${isShaking ? 'animate-shake' : ''}
-                  `}
-                  disabled={isIncorrect}
-                >
-                  {formatPokemonName(choice.name)}
-                </button>
-              );
-            })}
+            {gameState.choices.length > 0 ? (
+              gameState.choices.map((choice) => {
+                const isIncorrect = gameState.incorrectGuesses.has(choice.name);
+                const isShaking = choice.name === gameState.shakingGuess;
+                return (
+                  <button
+                    key={choice.id}
+                    onClick={() => handleGuess(choice.name)}
+                    className={`w-full px-6 py-3 rounded-full transition-all text-lg font-bold
+                      ${isIncorrect ? 'bg-gray-400 hover:bg-gray-400 text-gray-600' : 'bg-custom-teal hover:bg-opacity-90 text-white'}
+                      ${isShaking ? 'animate-shake' : ''}
+                    `}
+                    disabled={isIncorrect}
+                  >
+                    {formatPokemonName(choice.name)}
+                  </button>
+                )
+              })
+            ) : (
+              <div className="text-center text-custom-brown">Loading choices...</div>
+            )}
           </div>
         ) : (
           <form 
