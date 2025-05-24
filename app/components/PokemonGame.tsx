@@ -41,6 +41,9 @@ interface GameState {
   currentRoundIndex: number;
   usedPokemonIds: Set<number>;
   disabledChoices: Set<string>;
+  wasCorrect: boolean;
+  isQuickGuess: boolean;
+  isTransitioning: boolean;
 }
 
 interface ModeSwitchModal {
@@ -93,7 +96,7 @@ export default function PokemonGame() {
     timeLeft: GAME_DURATION,
     score: 0,
     highScore: 0,
-    guessesLeft: NORMAL_MODE_GUESSES,
+    guessesLeft: getInitialGuesses(getStoredDifficulty()),
     isWrongGuess: false,
     hint: '',
     mode: getStoredMode(),
@@ -107,7 +110,10 @@ export default function PokemonGame() {
     prefetchedPokemon: [],
     currentRoundIndex: 0,
     usedPokemonIds: new Set(),
-    disabledChoices: new Set()
+    disabledChoices: new Set(),
+    wasCorrect: false,
+    isQuickGuess: false,
+    isTransitioning: false
   });
 
   const [modeSwitchModal, setModeSwitchModal] = useState<ModeSwitchModal>({
@@ -201,7 +207,8 @@ export default function PokemonGame() {
         incorrectGuesses: new Set(),
         shakingGuess: null,
         usedPokemonIds: usedIds,
-        disabledChoices: new Set()
+        disabledChoices: new Set(),
+        isQuickGuess: false
       }));
 
     } catch (error) {
@@ -212,26 +219,68 @@ export default function PokemonGame() {
 
   const loadNextRound = useCallback(() => {
     const nextIndex = gameState.currentRoundIndex + 1;
-    if (nextIndex >= gameState.prefetchedPokemon.length) return;
+    
+    // If we're done with all rounds, show summary
+    if (nextIndex >= ROUNDS_PER_GAME) {
+      setShowSummary(true);
+      return;
+    }
 
-    const nextRound = gameState.prefetchedPokemon[nextIndex];
+    // First set loading state
     setGameState(prev => ({
       ...prev,
-      pokemon: nextRound.pokemon,
-      choices: nextRound.choices,
-      currentRoundIndex: nextIndex,
-      isLoading: false,
-      isRevealed: false,
-      userGuess: '',
-      timeLeft: GAME_DURATION,
-      guessesLeft: getInitialGuesses(prev.difficulty),
-      hint: '',
-      isWrongGuess: false,
-      incorrectGuesses: new Set(),
-      shakingGuess: null,
-      disabledChoices: new Set()
+      isLoading: true,
+      choices: [], // Clear choices while loading
     }));
+
+    // Then in the next tick, set the new round data
+    setTimeout(() => {
+      const nextRound = gameState.prefetchedPokemon[nextIndex];
+      if (!nextRound) {
+        console.error('No data for next round:', nextIndex);
+        setShowSummary(true);
+        return;
+      }
+
+      setGameState(prev => ({
+        ...prev,
+        pokemon: nextRound.pokemon,
+        choices: nextRound.choices || [],
+        currentRoundIndex: nextIndex,
+        isLoading: false,
+        isRevealed: false,
+        userGuess: '',
+        timeLeft: GAME_DURATION,
+        guessesLeft: getInitialGuesses(prev.difficulty),
+        hint: '',
+        isWrongGuess: false,
+        shakingGuess: null,
+        disabledChoices: new Set(),
+        isQuickGuess: false,
+        isTransitioning: false  // Reset transitioning state
+      }));
+    }, 0);
   }, [gameState.currentRoundIndex, gameState.prefetchedPokemon]);
+
+  const finishRound = useCallback(() => {
+    const isLastRound = gameState.currentRoundIndex === ROUNDS_PER_GAME - 1;
+    
+    // Set transitioning state immediately
+    setGameState(prev => ({
+      ...prev,
+      isTransitioning: true
+    }));
+
+    if (isLastRound) {
+      setTimeout(() => {
+        setShowSummary(true);
+      }, REVEAL_DURATION);
+    } else {
+      setTimeout(() => {
+        loadNextRound();
+      }, REVEAL_DURATION);
+    }
+  }, [gameState.currentRoundIndex, loadNextRound]);
 
   // Initial game setup
   useEffect(() => {
@@ -245,26 +294,14 @@ export default function PokemonGame() {
       timer = setInterval(() => {
         setGameState(prev => {
           const newTimeLeft = prev.timeLeft - 1;
-          const timeIsUp = newTimeLeft <= 0;
-          
-          if (timeIsUp) {
-            setTimeout(() => {
-              if (prev.roundsPlayed + 1 === ROUNDS_PER_GAME) {
-                setShowSummary(true);
-              } else {
-                loadNextRound();
-              }
-            }, REVEAL_DURATION);
+          if (newTimeLeft <= 0) {
+            return {
+              ...prev,
+              timeLeft: 0,
+              isRevealed: true
+            };
           }
-          
-          return {
-            ...prev,
-            timeLeft: newTimeLeft,
-            isRevealed: timeIsUp,
-            ...(timeIsUp && {
-              roundsPlayed: prev.roundsPlayed + 1
-            })
-          };
+          return { ...prev, timeLeft: newTimeLeft };
         });
       }, 1000);
     }
@@ -272,7 +309,14 @@ export default function PokemonGame() {
     return () => {
       if (timer) clearInterval(timer);
     };
-  }, [gameState.isRevealed, gameState.timeLeft, gameState.isLoading, loadNextRound]);
+  }, [gameState.isRevealed, gameState.timeLeft, gameState.isLoading]);
+
+  // When time runs out, trigger round finish
+  useEffect(() => {
+    if (gameState.timeLeft === 0 && gameState.isRevealed) {
+      finishRound();
+    }
+  }, [gameState.timeLeft, gameState.isRevealed, finishRound]);
 
   const getHint = (name: string): string => {
     return `Hint: This Pokemon's name ${name.length > 6 ? 'has ' + name.length + ' letters' : 'starts with ' + name[0].toUpperCase()}`;
@@ -286,16 +330,28 @@ export default function PokemonGame() {
   };
 
   const handleGuess = (guess: string) => {
-    if (!gameState.pokemon) return;
+    // Early returns for invalid states
+    if (!gameState.pokemon || 
+        gameState.isLoading || 
+        gameState.isRevealed || 
+        gameState.guessesLeft <= 0 ||
+        gameState.disabledChoices.has(guess)) {
+      return;
+    }
 
     const isCorrect = guess.toLowerCase() === gameState.pokemon.name.toLowerCase();
     
     if (isCorrect) {
-      const newScore = gameState.score + Math.ceil((gameState.timeLeft + gameState.guessesLeft * 5) / 2);
+      const isQuickGuess = gameState.timeLeft > GAME_DURATION - 10;
+      const timeBonus = isQuickGuess ? 15 : 0;
+      const newScore = gameState.score + Math.ceil((gameState.timeLeft + gameState.guessesLeft * 5) / 2) + timeBonus;
       const newHighScore = Math.max(newScore, gameState.highScore);
       const newCorrectGuesses = [...gameState.correctGuesses, gameState.pokemon];
-      const newRoundsPlayed = gameState.roundsPlayed + 1;
 
+      // Disable all choices when correct
+      const allDisabled = new Set(gameState.choices.map(choice => choice.name));
+
+      // First set the revealed state
       setGameState(prev => ({
         ...prev,
         isRevealed: true,
@@ -304,64 +360,67 @@ export default function PokemonGame() {
         showConfetti: true,
         shakingGuess: null,
         correctGuesses: newCorrectGuesses,
-        roundsPlayed: newRoundsPlayed
+        wasCorrect: true,
+        guessesLeft: 0,
+        isQuickGuess: isQuickGuess,
+        disabledChoices: allDisabled,
+        userGuess: '',
+        hint: ''
       }));
 
+      // Start confetti and schedule its cleanup
       setTimeout(() => {
-        setGameState(prev => ({ ...prev, showConfetti: false }));
+        setGameState(prev => ({ 
+          ...prev, 
+          showConfetti: false 
+        }));
       }, CONFETTI_DURATION);
 
+      // Schedule the transition to next round
       setTimeout(() => {
-        if (newRoundsPlayed === ROUNDS_PER_GAME) {
-          setShowSummary(true);
-        } else {
-          loadNextRound();
-        }
+        finishRound();
       }, REVEAL_DURATION);
     } else {
       const newGuessesLeft = gameState.guessesLeft - 1;
-      const newIncorrectGuesses = new Set(gameState.incorrectGuesses);
-      newIncorrectGuesses.add(guess);
-      
-      // Add the incorrect guess to disabled choices
-      const newDisabledChoices = new Set(gameState.disabledChoices);
-      newDisabledChoices.add(guess);
+      const newDisabledChoices = new Set([...gameState.disabledChoices, guess]);
+      const newHint = newGuessesLeft === 1 ? getHint(gameState.pokemon.name) : gameState.hint;
 
-      if (newGuessesLeft === 0) {
+      if (newGuessesLeft <= 0) {
+        // Disable all choices when out of guesses
+        const allDisabled = new Set(gameState.choices.map(choice => choice.name));
+        
         setGameState(prev => ({
           ...prev,
-          guessesLeft: newGuessesLeft,
-          isWrongGuess: true,
-          userGuess: '',
-          hint: '',
+          guessesLeft: 0,
           isRevealed: true,
-          incorrectGuesses: newIncorrectGuesses,
-          disabledChoices: newDisabledChoices,
-          shakingGuess: null,
-          roundsPlayed: prev.roundsPlayed + 1
+          disabledChoices: allDisabled,
+          userGuess: '',
+          wasCorrect: false,
+          hint: ''  // Clear hint when revealed
         }));
-
-        setTimeout(() => {
-          if (gameState.roundsPlayed + 1 === ROUNDS_PER_GAME) {
-            setShowSummary(true);
-          } else {
-            loadNextRound();
-          }
-        }, REVEAL_DURATION);
       } else {
+        // Set the wrong guess state
         setGameState(prev => ({
           ...prev,
           guessesLeft: newGuessesLeft,
           isWrongGuess: true,
           userGuess: '',
-          hint: newGuessesLeft === 1 ? getHint(gameState.pokemon!.name) : '',
-          incorrectGuesses: newIncorrectGuesses,
+          hint: newHint,
           disabledChoices: newDisabledChoices,
           shakingGuess: guess
         }));
 
+        // Only remove the shake animation after timeout, preserve other state
         setTimeout(() => {
-          setGameState(prev => ({ ...prev, shakingGuess: null }));
+          setGameState(prev => ({
+            ...prev,
+            shakingGuess: null,
+            isWrongGuess: false,
+            // Explicitly maintain these states
+            hint: newHint,
+            disabledChoices: newDisabledChoices,
+            guessesLeft: newGuessesLeft
+          }));
         }, 500);
       }
     }
@@ -427,7 +486,10 @@ export default function PokemonGame() {
       prefetchedPokemon: [],
       currentRoundIndex: 0,
       usedPokemonIds: new Set(),
-      disabledChoices: new Set()
+      disabledChoices: new Set(),
+      wasCorrect: false,
+      isQuickGuess: false,
+      isTransitioning: false
     });
   };
 
@@ -464,7 +526,7 @@ Try to beat my score at https://whos-that-pokemon-gold.vercel.app/ !
     });
   };
 
-  if (gameState.isLoading || !gameState.pokemon || (gameState.difficulty === 'easy' && gameState.choices.length === 0)) {
+  if (gameState.isLoading || !gameState.pokemon || (gameState.difficulty === 'easy' && !gameState.choices.length)) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="text-2xl text-custom-brown">Loading...</div>
@@ -573,7 +635,7 @@ Try to beat my score at https://whos-that-pokemon-gold.vercel.app/ !
               alt="Pokemon front view"
               fill
               className={`object-contain transition-opacity duration-500 ${
-                gameState.isRevealed ? 'opacity-100' : 'opacity-0'
+                gameState.isRevealed ? 'opacity-100 brightness-100' : 'opacity-0'
               }`}
             />
           )}
@@ -583,8 +645,8 @@ Try to beat my score at https://whos-that-pokemon-gold.vercel.app/ !
               alt="Pokemon back view"
               fill
               className={`object-contain transition-opacity duration-500 ${
-                gameState.isRevealed ? 'opacity-0' : 'opacity-100'
-              } filter brightness-0`}
+                gameState.isRevealed ? 'opacity-0' : 'opacity-100 brightness-0'
+              }`}
             />
           )}
         </div>
@@ -597,7 +659,7 @@ Try to beat my score at https://whos-that-pokemon-gold.vercel.app/ !
             Guesses Left: {gameState.guessesLeft}
           </div>
           <div className="text-lg font-bold text-custom-brown">
-            Round: {gameState.roundsPlayed + 1}/{ROUNDS_PER_GAME}
+            Round: {gameState.currentRoundIndex + 1}/{ROUNDS_PER_GAME}
           </div>
         </div>
 
@@ -607,21 +669,33 @@ Try to beat my score at https://whos-that-pokemon-gold.vercel.app/ !
           </div>
         )}
 
-        {gameState.isRevealed || gameState.guessesLeft === 0 || gameState.timeLeft === 0 ? (
+        {gameState.isRevealed ? (
           <div className="flex flex-col items-center gap-4">
             <div className="text-2xl font-bold text-custom-brown">
-              It&apos;s {formatPokemonName(gameState.pokemon.name)}!
+              {gameState.wasCorrect ? (
+                <>
+                  You got it right! It&apos;s {formatPokemonName(gameState.pokemon.name)}!
+                  {gameState.isQuickGuess && (
+                    <div className="text-lg text-custom-green mt-2">
+                      Speed bonus! +15 points for guessing within 10 seconds! 🚀
+                    </div>
+                  )}
+                </>
+              ) : (
+                `Time's up! It's ${formatPokemonName(gameState.pokemon.name)}!`
+              )}
             </div>
-            {gameState.roundsPlayed < ROUNDS_PER_GAME ? (
+            {gameState.currentRoundIndex < ROUNDS_PER_GAME - 1 ? (
               <button
-                onClick={() => {
-                  setTimeout(() => {
-                    loadNextRound();
-                  }, REVEAL_DURATION);
-                }}
-                className="bg-custom-teal hover:bg-opacity-90 text-white font-bold py-2 px-6 rounded-full transition-all"
+                onClick={() => finishRound()}
+                disabled={gameState.isTransitioning}
+                className={`px-6 py-2 rounded-full transition-all font-bold
+                  ${gameState.isTransitioning 
+                    ? 'bg-gray-400 text-gray-600 cursor-not-allowed'
+                    : 'bg-custom-teal hover:bg-opacity-90 text-white'
+                  }`}
               >
-                Next Pokemon
+                {gameState.isTransitioning ? 'Loading Next Pokemon...' : 'Next Pokemon'}
               </button>
             ) : (
               <div className="flex flex-col items-center gap-4">
@@ -639,23 +713,40 @@ Try to beat my score at https://whos-that-pokemon-gold.vercel.app/ !
           </div>
         ) : gameState.difficulty === 'easy' ? (
           <div className="grid grid-cols-1 gap-4 w-full max-w-md">
-            {gameState.choices.map((choice) => {
-              const isDisabled = gameState.disabledChoices.has(choice.name);
-              const isShaking = choice.name === gameState.shakingGuess;
-              return (
-                <button
-                  key={choice.id}
-                  onClick={() => handleGuess(choice.name)}
-                  className={`w-full px-6 py-3 rounded-full transition-all text-lg font-bold
-                    ${isDisabled ? 'bg-gray-400 hover:bg-gray-400 text-gray-600 cursor-not-allowed' : 'bg-custom-teal hover:bg-opacity-90 text-white'}
-                    ${isShaking ? 'animate-shake' : ''}
-                  `}
-                  disabled={isDisabled || gameState.isLoading}
-                >
-                  {formatPokemonName(choice.name)}
-                </button>
-              );
-            })}
+            {gameState.choices.length === 0 ? (
+              <div className="text-center text-custom-brown">Loading choices...</div>
+            ) : (
+              gameState.choices.map((choice) => {
+                const isDisabled = gameState.disabledChoices.has(choice.name) || 
+                                  gameState.guessesLeft <= 0 ||
+                                  gameState.isRevealed;
+                const isShaking = choice.name === gameState.shakingGuess;
+
+                // Add debug logging
+                console.log('Choice state:', {
+                  name: choice.name,
+                  isDisabled,
+                  inDisabledSet: gameState.disabledChoices.has(choice.name),
+                  guessesLeft: gameState.guessesLeft,
+                  isRevealed: gameState.isRevealed,
+                  disabledChoices: Array.from(gameState.disabledChoices)
+                });
+
+                return (
+                  <button
+                    key={choice.id}
+                    onClick={() => handleGuess(choice.name)}
+                    className={`w-full px-6 py-3 rounded-full transition-all text-lg font-bold
+                      ${isDisabled ? 'bg-gray-400 hover:bg-gray-400 text-gray-600 cursor-not-allowed' : 'bg-custom-teal hover:bg-opacity-90 text-white'}
+                      ${isShaking ? 'animate-shake' : ''}
+                    `}
+                    disabled={isDisabled}
+                  >
+                    {formatPokemonName(choice.name)}
+                  </button>
+                );
+              })
+            )}
           </div>
         ) : (
           <form 
