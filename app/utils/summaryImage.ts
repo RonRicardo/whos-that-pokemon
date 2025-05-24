@@ -88,7 +88,7 @@ export const generateSummaryImage = async (
 
   // Draw Pokemon in a grid with more space
   const startY = HEADER_HEIGHT + 200;
-  const pokemonPerRow = 3;
+  const pokemonPerRow = correctGuesses.length;
   const promises = correctGuesses.map(async (pokemon, index) => {
     try {
       const row = Math.floor(index / pokemonPerRow);
