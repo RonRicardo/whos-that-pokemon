@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { fetchRandomPokemon, type Pokemon } from '../services/pokemonService';
+import { fetchRandomPokemon, type Pokemon, type GameMode } from '../services/pokemonService';
 
 interface GameState {
   pokemon: Pokemon | null;
@@ -14,6 +14,7 @@ interface GameState {
   guessesLeft: number;
   isWrongGuess: boolean;
   hint: string;
+  mode: GameMode;
 }
 
 export default function PokemonGame() {
@@ -27,7 +28,8 @@ export default function PokemonGame() {
     score: 0,
     guessesLeft: 3,
     isWrongGuess: false,
-    hint: ''
+    hint: '',
+    mode: 'modern'
   });
 
   useEffect(() => {
@@ -55,10 +57,10 @@ export default function PokemonGame() {
   const loadNewPokemon = async () => {
     setGameState(prev => ({ ...prev, isLoading: true }));
     try {
-      let pokemon = await fetchRandomPokemon();
+      let pokemon = await fetchRandomPokemon(gameState.mode);
       // Keep trying until we find a Pokemon with both sprites
       while (!pokemon.sprites.front_default || !pokemon.sprites.back_default) {
-        pokemon = await fetchRandomPokemon();
+        pokemon = await fetchRandomPokemon(gameState.mode);
       }
       
       setGameState(prev => ({
@@ -122,6 +124,35 @@ export default function PokemonGame() {
 
   return (
     <div className="flex flex-col items-center gap-6">
+      <div className="flex gap-4 mb-4">
+        <button
+          onClick={() => {
+            setGameState(prev => ({ ...prev, mode: 'classic' }));
+            loadNewPokemon();
+          }}
+          className={`px-4 py-2 rounded-full transition-all ${
+            gameState.mode === 'classic'
+              ? 'bg-custom-rose text-white'
+              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+          }`}
+        >
+          Classic Mode (Gen 1)
+        </button>
+        <button
+          onClick={() => {
+            setGameState(prev => ({ ...prev, mode: 'modern' }));
+            loadNewPokemon();
+          }}
+          className={`px-4 py-2 rounded-full transition-all ${
+            gameState.mode === 'modern'
+              ? 'bg-custom-teal text-white'
+              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+          }`}
+        >
+          Modern Mode (All Gens)
+        </button>
+      </div>
+
       <div className="relative w-64 h-64 bg-gray-100 rounded-lg overflow-hidden">
         {gameState.pokemon.sprites.front_default && (
           <Image

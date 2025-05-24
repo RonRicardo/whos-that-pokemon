@@ -1,5 +1,6 @@
 const POKEMON_API_BASE_URL = 'https://pokeapi.co/api/v2';
 const MAX_POKEMON_ID = 1025;
+const CLASSIC_MAX_POKEMON_ID = 151;
 
 export interface Pokemon {
   id: number;
@@ -15,8 +16,11 @@ export interface Pokemon {
   };
 }
 
-export const getRandomPokemonId = (): number => {
-  return Math.floor(Math.random() * MAX_POKEMON_ID) + 1;
+export type GameMode = 'classic' | 'modern';
+
+export const getRandomPokemonId = (mode: GameMode): number => {
+  const maxId = mode === 'classic' ? CLASSIC_MAX_POKEMON_ID : MAX_POKEMON_ID;
+  return Math.floor(Math.random() * maxId) + 1;
 };
 
 export const fetchPokemon = async (id: number): Promise<Pokemon> => {
@@ -35,7 +39,7 @@ export const fetchPokemon = async (id: number): Promise<Pokemon> => {
   }
 };
 
-export const fetchRandomPokemon = async (): Promise<Pokemon> => {
-  const randomId = getRandomPokemonId();
+export const fetchRandomPokemon = async (mode: GameMode = 'modern'): Promise<Pokemon> => {
+  const randomId = getRandomPokemonId(mode);
   return fetchPokemon(randomId);
 }; 
