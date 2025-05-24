@@ -26,6 +26,8 @@ interface GameState {
   difficulty: Difficulty;
   showConfetti: boolean;
   choices: Pokemon[];
+  incorrectGuesses: Set<string>;
+  shakingGuess: string | null;
 }
 
 interface ModeSwitchModal {
@@ -34,8 +36,15 @@ interface ModeSwitchModal {
   targetDifficulty: Difficulty | null;
 }
 
+const GAME_DURATION = 30; // seconds
+const NORMAL_MODE_GUESSES = 3;
+const EASY_MODE_GUESSES = 2;
+
 export default function PokemonGame() {
-  const GAME_DURATION = 30; // seconds
+  const getInitialGuesses = (difficulty: Difficulty) => {
+    return difficulty === 'easy' ? EASY_MODE_GUESSES : NORMAL_MODE_GUESSES;
+  };
+
   const [gameState, setGameState] = useState<GameState>({
     pokemon: null,
     isLoading: true,
@@ -43,13 +52,15 @@ export default function PokemonGame() {
     userGuess: '',
     timeLeft: GAME_DURATION,
     score: 0,
-    guessesLeft: 3,
+    guessesLeft: NORMAL_MODE_GUESSES,
     isWrongGuess: false,
     hint: '',
     mode: 'modern',
     difficulty: 'normal',
     showConfetti: false,
-    choices: []
+    choices: [],
+    incorrectGuesses: new Set(),
+    shakingGuess: null
   });
 
   const [modeSwitchModal, setModeSwitchModal] = useState<ModeSwitchModal>({
@@ -118,7 +129,7 @@ export default function PokemonGame() {
           result = await fetchRandomPokemonWithChoices(gameState.mode);
         } while (!result.correct.sprites.front_default || !result.correct.sprites.back_default);
 
-        console.log('Loaded Pokemon with choices:', result); // Debug log
+        console.log('Loaded Pokemon with choices:', result);
 
         setGameState(prev => ({
           ...prev,
@@ -128,9 +139,11 @@ export default function PokemonGame() {
           isRevealed: false,
           userGuess: '',
           timeLeft: GAME_DURATION,
-          guessesLeft: 3,
+          guessesLeft: EASY_MODE_GUESSES,
           hint: '',
-          isWrongGuess: false
+          isWrongGuess: false,
+          incorrectGuesses: new Set(),
+          shakingGuess: null
         }));
       } else {
         let pokemon = await fetchRandomPokemon(gameState.mode);
@@ -146,9 +159,11 @@ export default function PokemonGame() {
           isRevealed: false,
           userGuess: '',
           timeLeft: GAME_DURATION,
-          guessesLeft: 3,
+          guessesLeft: NORMAL_MODE_GUESSES,
           hint: '',
-          isWrongGuess: false
+          isWrongGuess: false,
+          incorrectGuesses: new Set(),
+          shakingGuess: null
         }));
       }
     } catch (error) {
@@ -167,7 +182,8 @@ export default function PokemonGame() {
         ...prev,
         isRevealed: true,
         score: prev.score + Math.ceil((prev.timeLeft + prev.guessesLeft * 5) / 2),
-        showConfetti: true
+        showConfetti: true,
+        shakingGuess: null
       }));
 
       setTimeout(() => {
@@ -175,17 +191,22 @@ export default function PokemonGame() {
       }, 5000);
     } else {
       const newGuessesLeft = gameState.guessesLeft - 1;
+      const newIncorrectGuesses = new Set(gameState.incorrectGuesses);
+      newIncorrectGuesses.add(guess);
+
       setGameState(prev => ({
         ...prev,
         guessesLeft: newGuessesLeft,
         isWrongGuess: true,
         userGuess: '',
         hint: newGuessesLeft === 1 ? getHint(gameState.pokemon!.name) : '',
-        isRevealed: newGuessesLeft === 0
+        isRevealed: newGuessesLeft === 0,
+        incorrectGuesses: newIncorrectGuesses,
+        shakingGuess: guess
       }));
 
       setTimeout(() => {
-        setGameState(prev => ({ ...prev, isWrongGuess: false }));
+        setGameState(prev => ({ ...prev, shakingGuess: null }));
       }, 500);
     }
   };
@@ -228,13 +249,15 @@ export default function PokemonGame() {
       userGuess: '',
       timeLeft: GAME_DURATION,
       score: 0,
-      guessesLeft: 3,
+      guessesLeft: getInitialGuesses(newDifficulty),
       isWrongGuess: false,
       hint: '',
       mode: newMode,
       difficulty: newDifficulty,
       showConfetti: false,
-      choices: []
+      choices: [],
+      incorrectGuesses: new Set(),
+      shakingGuess: null
     });
   };
 
@@ -384,17 +407,23 @@ export default function PokemonGame() {
           </div>
         ) : gameState.difficulty === 'easy' ? (
           <div className="grid grid-cols-1 gap-4 w-full max-w-md">
-            {gameState.choices.map((choice) => (
-              <button
-                key={choice.id}
-                onClick={() => handleGuess(choice.name)}
-                className={`w-full px-6 py-3 rounded-full transition-all ${
-                  gameState.isWrongGuess ? 'animate-shake' : ''
-                } bg-custom-teal hover:bg-opacity-90 text-white font-bold text-lg`}
-              >
-                {formatPokemonName(choice.name)}
-              </button>
-            ))}
+            {gameState.choices.map((choice) => {
+              const isIncorrect = gameState.incorrectGuesses.has(choice.name);
+              const isShaking = choice.name === gameState.shakingGuess;
+              return (
+                <button
+                  key={choice.id}
+                  onClick={() => handleGuess(choice.name)}
+                  className={`w-full px-6 py-3 rounded-full transition-all text-lg font-bold
+                    ${isIncorrect ? 'bg-gray-400 hover:bg-gray-400 text-gray-600' : 'bg-custom-teal hover:bg-opacity-90 text-white'}
+                    ${isShaking ? 'animate-shake' : ''}
+                  `}
+                  disabled={isIncorrect}
+                >
+                  {formatPokemonName(choice.name)}
+                </button>
+              );
+            })}
           </div>
         ) : (
           <form 
