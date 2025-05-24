@@ -30,6 +30,33 @@ function getCachedPokemon(id: number): Pokemon | null {
   }
 }
 
+function clearOldestCacheEntries(requiredSpace: number = 1): void {
+  try {
+    // Get all Pokemon cache entries
+    const cacheEntries: { key: string; timestamp: number }[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('pokemon_')) {
+        const item = localStorage.getItem(key);
+        if (item) {
+          const entry: CacheEntry = JSON.parse(item);
+          cacheEntries.push({ key, timestamp: entry.timestamp });
+        }
+      }
+    }
+
+    // Sort by timestamp (oldest first)
+    cacheEntries.sort((a, b) => a.timestamp - b.timestamp);
+
+    // Remove oldest entries until we've cleared enough space
+    for (let i = 0; i < Math.min(requiredSpace, cacheEntries.length); i++) {
+      localStorage.removeItem(cacheEntries[i].key);
+    }
+  } catch (error) {
+    console.warn('Error clearing cache:', error);
+  }
+}
+
 function cachePokemon(id: number, data: Pokemon): void {
   try {
     const cacheKey = `pokemon_${id}`;
@@ -37,7 +64,22 @@ function cachePokemon(id: number, data: Pokemon): void {
       data,
       timestamp: Date.now()
     };
-    localStorage.setItem(cacheKey, JSON.stringify(entry));
+    
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify(entry));
+    } catch (error) {
+      if (error instanceof Error && error.name === 'QuotaExceededError') {
+        // Clear some space and try again
+        clearOldestCacheEntries(5); // Clear 5 oldest entries
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify(entry));
+        } catch (retryError) {
+          console.warn('Failed to cache Pokemon even after clearing space:', retryError);
+        }
+      } else {
+        throw error;
+      }
+    }
   } catch (error) {
     console.warn('Error writing to cache:', error);
   }

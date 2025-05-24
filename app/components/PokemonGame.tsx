@@ -13,6 +13,11 @@ import {
 import Modal from './Modal';
 import GameSummaryModal from './GameSummaryModal';
 
+interface PrefetchedRound {
+  pokemon: Pokemon;
+  choices: Pokemon[];
+}
+
 interface GameState {
   pokemon: Pokemon | null;
   isLoading: boolean;
@@ -32,6 +37,8 @@ interface GameState {
   shakingGuess: string | null;
   correctGuesses: Pokemon[];
   roundsPlayed: number;
+  prefetchedPokemon: PrefetchedRound[];
+  currentRoundIndex: number;
 }
 
 interface ModeSwitchModal {
@@ -44,6 +51,8 @@ const GAME_DURATION = 30; // seconds
 const NORMAL_MODE_GUESSES = 3;
 const EASY_MODE_GUESSES = 2;
 const ROUNDS_PER_GAME = 5;
+const REVEAL_DURATION = 2500; // 2.5 seconds to show the revealed Pokemon
+const CONFETTI_DURATION = 2000; // 2 seconds for confetti
 
 export default function PokemonGame() {
   const getInitialGuesses = (difficulty: Difficulty) => {
@@ -68,7 +77,9 @@ export default function PokemonGame() {
     incorrectGuesses: new Set(),
     shakingGuess: null,
     correctGuesses: [],
-    roundsPlayed: 0
+    roundsPlayed: 0,
+    prefetchedPokemon: [],
+    currentRoundIndex: 0
   });
 
   const [modeSwitchModal, setModeSwitchModal] = useState<ModeSwitchModal>({
@@ -98,105 +109,97 @@ export default function PokemonGame() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const loadNewPokemon = useCallback(async () => {
-    if (gameState.roundsPlayed >= ROUNDS_PER_GAME) {
-      return;
-    }
+  const prefetchPokemonForGame = useCallback(async (mode: GameMode, difficulty: Difficulty) => {
     setGameState(prev => ({ ...prev, isLoading: true }));
     try {
-      if (gameState.difficulty === 'easy') {
-        let result: { correct: Pokemon; choices: Pokemon[] };
-        let validChoices = false;
-        let retryCount = 0;
-        const MAX_RETRIES = 3;
+      const prefetchedData: PrefetchedRound[] = [];
+      let retryCount = 0;
+      const MAX_RETRIES = 3;
 
-        while (!validChoices && retryCount < MAX_RETRIES) {
-          try {
-            result = await fetchRandomPokemonWithChoices(gameState.mode);
-            validChoices = result.choices.every(pokemon => 
+      while (prefetchedData.length < ROUNDS_PER_GAME && retryCount < MAX_RETRIES) {
+        try {
+          if (difficulty === 'easy') {
+            const result = await fetchRandomPokemonWithChoices(mode);
+            // Validate all Pokemon have required sprites
+            const allSpritesValid = [result.correct, ...result.choices].every(pokemon => 
               pokemon.sprites.front_default && pokemon.sprites.back_default
             );
-            if (!validChoices) {
-              retryCount++;
-              console.log(`Retry ${retryCount}: Some Pokemon missing sprites`);
+            if (allSpritesValid) {
+              prefetchedData.push({
+                pokemon: result.correct,
+                choices: result.choices
+              });
             }
-          } catch (error) {
-            retryCount++;
-            console.error(`Retry ${retryCount} failed:`, error);
+          } else {
+            const pokemon = await fetchRandomPokemon(mode);
+            if (pokemon.sprites.front_default && pokemon.sprites.back_default) {
+              prefetchedData.push({
+                pokemon,
+                choices: []
+              });
+            }
           }
-        }
-
-        // If we couldn't get valid choices after retries, fallback to normal mode
-        if (!validChoices) {
-          console.error('Failed to load valid choices after retries, falling back to normal mode');
-          setGameState(prev => ({
-            ...prev,
-            difficulty: 'normal',
-            isLoading: false
-          }));
-          return;
-        }
-
-        setGameState(prev => ({
-          ...prev,
-          pokemon: result!.correct,
-          choices: result!.choices,
-          isLoading: false,
-          isRevealed: false,
-          userGuess: '',
-          timeLeft: GAME_DURATION,
-          guessesLeft: EASY_MODE_GUESSES,
-          hint: '',
-          isWrongGuess: false,
-          incorrectGuesses: new Set(),
-          shakingGuess: null
-        }));
-      } else {
-        let pokemon = await fetchRandomPokemon(gameState.mode);
-        let retryCount = 0;
-        const MAX_RETRIES = 3;
-
-        while ((!pokemon.sprites.front_default || !pokemon.sprites.back_default) && retryCount < MAX_RETRIES) {
+        } catch (error) {
+          console.error(`Retry ${retryCount + 1} failed:`, error);
           retryCount++;
-          console.log(`Retry ${retryCount}: Pokemon missing sprites`);
-          pokemon = await fetchRandomPokemon(gameState.mode);
         }
-
-        // If we still don't have valid sprites, show an error state
-        if (!pokemon.sprites.front_default || !pokemon.sprites.back_default) {
-          console.error('Failed to load Pokemon with valid sprites');
-          setGameState(prev => ({ 
-            ...prev, 
-            isLoading: false,
-            pokemon: null
-          }));
-          return;
-        }
-
-        setGameState(prev => ({
-          ...prev,
-          pokemon,
-          choices: [],
-          isLoading: false,
-          isRevealed: false,
-          userGuess: '',
-          timeLeft: GAME_DURATION,
-          guessesLeft: NORMAL_MODE_GUESSES,
-          hint: '',
-          isWrongGuess: false,
-          incorrectGuesses: new Set(),
-          shakingGuess: null
-        }));
       }
+
+      if (prefetchedData.length < ROUNDS_PER_GAME) {
+        throw new Error('Failed to fetch valid Pokemon data for all rounds');
+      }
+
+      // Set the first round's data
+      const firstRound = prefetchedData[0];
+      setGameState(prev => ({
+        ...prev,
+        isLoading: false,
+        pokemon: firstRound.pokemon,
+        choices: firstRound.choices,
+        prefetchedPokemon: prefetchedData,
+        currentRoundIndex: 0,
+        timeLeft: GAME_DURATION,
+        guessesLeft: getInitialGuesses(difficulty),
+        isRevealed: false,
+        userGuess: '',
+        hint: '',
+        isWrongGuess: false,
+        incorrectGuesses: new Set(),
+        shakingGuess: null
+      }));
+
     } catch (error) {
-      console.error('Failed to load Pokemon:', error);
+      console.error('Failed to prefetch Pokemon:', error);
       setGameState(prev => ({ ...prev, isLoading: false }));
     }
-  }, [gameState.difficulty, gameState.mode, gameState.roundsPlayed]);
+  }, []);
 
+  const loadNextRound = useCallback(() => {
+    const nextIndex = gameState.currentRoundIndex + 1;
+    if (nextIndex >= gameState.prefetchedPokemon.length) return;
+
+    const nextRound = gameState.prefetchedPokemon[nextIndex];
+    setGameState(prev => ({
+      ...prev,
+      pokemon: nextRound.pokemon,
+      choices: nextRound.choices,
+      currentRoundIndex: nextIndex,
+      isLoading: false,
+      isRevealed: false,
+      userGuess: '',
+      timeLeft: GAME_DURATION,
+      guessesLeft: getInitialGuesses(prev.difficulty),
+      hint: '',
+      isWrongGuess: false,
+      incorrectGuesses: new Set(),
+      shakingGuess: null
+    }));
+  }, [gameState.currentRoundIndex, gameState.prefetchedPokemon]);
+
+  // Initial game setup
   useEffect(() => {
-    loadNewPokemon();
-  }, [loadNewPokemon]);
+    prefetchPokemonForGame(gameState.mode, gameState.difficulty);
+  }, [prefetchPokemonForGame, gameState.mode, gameState.difficulty]);
 
   useEffect(() => {
     let timer: NodeJS.Timeout | null = null;
@@ -206,6 +209,16 @@ export default function PokemonGame() {
         setGameState(prev => {
           const newTimeLeft = prev.timeLeft - 1;
           const timeIsUp = newTimeLeft <= 0;
+          
+          if (timeIsUp) {
+            setTimeout(() => {
+              if (prev.roundsPlayed + 1 === ROUNDS_PER_GAME) {
+                setShowSummary(true);
+              } else {
+                loadNextRound();
+              }
+            }, REVEAL_DURATION);
+          }
           
           return {
             ...prev,
@@ -222,7 +235,7 @@ export default function PokemonGame() {
     return () => {
       if (timer) clearInterval(timer);
     };
-  }, [gameState.isRevealed, gameState.timeLeft, gameState.isLoading]);
+  }, [gameState.isRevealed, gameState.timeLeft, gameState.isLoading, loadNextRound]);
 
   const getHint = (name: string): string => {
     return `Hint: This Pokemon's name ${name.length > 6 ? 'has ' + name.length + ' letters' : 'starts with ' + name[0].toUpperCase()}`;
@@ -257,43 +270,59 @@ export default function PokemonGame() {
         roundsPlayed: newRoundsPlayed
       }));
 
-      if (newRoundsPlayed === ROUNDS_PER_GAME) {
-        setTimeout(() => {
-          setShowSummary(true);
-        }, 1500); // Show summary after confetti
-      }
-
       setTimeout(() => {
         setGameState(prev => ({ ...prev, showConfetti: false }));
-      }, 5000);
+      }, CONFETTI_DURATION);
+
+      setTimeout(() => {
+        if (newRoundsPlayed === ROUNDS_PER_GAME) {
+          setShowSummary(true);
+        } else {
+          loadNextRound();
+        }
+      }, REVEAL_DURATION);
     } else {
       const newGuessesLeft = gameState.guessesLeft - 1;
       const newIncorrectGuesses = new Set(gameState.incorrectGuesses);
       newIncorrectGuesses.add(guess);
 
-      setGameState(prev => ({
-        ...prev,
-        guessesLeft: newGuessesLeft,
-        isWrongGuess: true,
-        userGuess: '',
-        hint: newGuessesLeft === 1 ? getHint(gameState.pokemon!.name) : '',
-        isRevealed: newGuessesLeft === 0,
-        incorrectGuesses: newIncorrectGuesses,
-        shakingGuess: guess,
-        ...(newGuessesLeft === 0 && {
+      if (newGuessesLeft === 0) {
+        // On last wrong guess, reveal the Pokemon and increment round
+        setGameState(prev => ({
+          ...prev,
+          guessesLeft: newGuessesLeft,
+          isWrongGuess: true,
+          userGuess: '',
+          hint: '',
+          isRevealed: true,
+          incorrectGuesses: newIncorrectGuesses,
+          shakingGuess: null,
           roundsPlayed: prev.roundsPlayed + 1
-        })
-      }));
+        }));
 
-      if (newGuessesLeft === 0 && gameState.roundsPlayed + 1 === ROUNDS_PER_GAME) {
+        // After reveal duration, either show summary or load next Pokemon
         setTimeout(() => {
-          setShowSummary(true);
-        }, 1500);
-      }
+          if (gameState.roundsPlayed + 1 === ROUNDS_PER_GAME) {
+            setShowSummary(true);
+          } else {
+            loadNextRound();
+          }
+        }, REVEAL_DURATION);
+      } else {
+        setGameState(prev => ({
+          ...prev,
+          guessesLeft: newGuessesLeft,
+          isWrongGuess: true,
+          userGuess: '',
+          hint: newGuessesLeft === 1 ? getHint(gameState.pokemon!.name) : '',
+          incorrectGuesses: newIncorrectGuesses,
+          shakingGuess: guess
+        }));
 
-      setTimeout(() => {
-        setGameState(prev => ({ ...prev, shakingGuess: null }));
-      }, 500);
+        setTimeout(() => {
+          setGameState(prev => ({ ...prev, shakingGuess: null }));
+        }, 500);
+      }
     }
   };
 
@@ -311,7 +340,7 @@ export default function PokemonGame() {
     } else {
       console.log('Switching mode immediately');
       resetGameState(newMode, newDifficulty);
-      loadNewPokemon();
+      prefetchPokemonForGame(newMode, newDifficulty);
     }
   };
 
@@ -319,7 +348,7 @@ export default function PokemonGame() {
     console.log('Confirming mode switch to:', modeSwitchModal.targetMode);
     if (modeSwitchModal.targetMode && modeSwitchModal.targetDifficulty) {
       resetGameState(modeSwitchModal.targetMode, modeSwitchModal.targetDifficulty);
-      loadNewPokemon();
+      prefetchPokemonForGame(modeSwitchModal.targetMode, modeSwitchModal.targetDifficulty);
     }
   };
 
@@ -342,7 +371,9 @@ export default function PokemonGame() {
       incorrectGuesses: new Set(),
       shakingGuess: null,
       correctGuesses: [],
-      roundsPlayed: 0
+      roundsPlayed: 0,
+      prefetchedPokemon: [],
+      currentRoundIndex: 0
     });
   };
 
@@ -379,7 +410,7 @@ Try to beat my score at https://whos-that-pokemon-gold.vercel.app/ !
     });
   };
 
-  if (gameState.isLoading || !gameState.pokemon) {
+  if (gameState.isLoading || !gameState.pokemon || (gameState.difficulty === 'easy' && gameState.choices.length === 0)) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="text-2xl text-custom-brown">Loading...</div>
@@ -414,7 +445,7 @@ Try to beat my score at https://whos-that-pokemon-gold.vercel.app/ !
         onClose={() => {
           setShowSummary(false);
           resetGameState(gameState.mode, gameState.difficulty);
-          loadNewPokemon();
+          prefetchPokemonForGame(gameState.mode, gameState.difficulty);
         }}
         correctGuesses={gameState.correctGuesses}
         highScore={gameState.highScore}
@@ -522,14 +553,18 @@ Try to beat my score at https://whos-that-pokemon-gold.vercel.app/ !
           </div>
         )}
 
-        {gameState.isRevealed ? (
+        {gameState.isRevealed || gameState.guessesLeft === 0 || gameState.timeLeft === 0 ? (
           <div className="flex flex-col items-center gap-4">
             <div className="text-2xl font-bold text-custom-brown">
               It&apos;s {formatPokemonName(gameState.pokemon.name)}!
             </div>
             {gameState.roundsPlayed < ROUNDS_PER_GAME ? (
               <button
-                onClick={loadNewPokemon}
+                onClick={() => {
+                  setTimeout(() => {
+                    loadNextRound();
+                  }, REVEAL_DURATION);
+                }}
                 className="bg-custom-teal hover:bg-opacity-90 text-white font-bold py-2 px-6 rounded-full transition-all"
               >
                 Next Pokemon
