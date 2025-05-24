@@ -5,7 +5,7 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Who&apos;s That Pokemon",
+  title: "Who's That Pokemon",
   description: "A fun Pokemon guessing game",
 };
 
@@ -19,7 +19,7 @@ export default function RootLayout({
       <body className={`${inter.className} min-h-screen bg-custom-sand`}>
         <nav className="bg-custom-brown p-4 shadow-lg">
           <div className="container mx-auto">
-            <h1 className="text-2xl font-bold text-custom-sand">Who&apos;s That Pokemon?</h1>
+            <h1 className="text-2xl font-bold text-custom-sand">{`Who's That Pokemon?`}</h1>
           </div>
         </nav>
         
