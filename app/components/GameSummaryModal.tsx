@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Image from 'next/image';
 import { Pokemon } from '../services/pokemonService';
 
 interface GameSummaryModalProps {
@@ -59,10 +60,12 @@ export default function GameSummaryModal({
               className="flex flex-col items-center bg-gray-100 rounded-lg p-2"
             >
               {pokemon.sprites.front_default && (
-                <img 
+                <Image 
                   src={pokemon.sprites.front_default}
                   alt={pokemon.name}
-                  className="w-16 h-16 object-contain"
+                  width={64}
+                  height={64}
+                  className="object-contain"
                 />
               )}
               <span className="text-sm font-medium text-custom-brown mt-1">
