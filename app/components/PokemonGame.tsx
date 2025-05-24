@@ -44,6 +44,7 @@ interface GameState {
   wasCorrect: boolean;
   isQuickGuess: boolean;
   isTransitioning: boolean;
+  timeExpired: boolean;
 }
 
 interface ModeSwitchModal {
@@ -113,7 +114,8 @@ export default function PokemonGame() {
     disabledChoices: new Set(),
     wasCorrect: false,
     isQuickGuess: false,
-    isTransitioning: false
+    isTransitioning: false,
+    timeExpired: false
   });
 
   const [modeSwitchModal, setModeSwitchModal] = useState<ModeSwitchModal>({
@@ -257,7 +259,8 @@ export default function PokemonGame() {
         shakingGuess: null,
         disabledChoices: new Set(),
         isQuickGuess: false,
-        isTransitioning: false  // Reset transitioning state
+        isTransitioning: false,
+        timeExpired: false
       }));
     }, 0);
   }, [gameState.currentRoundIndex, gameState.prefetchedPokemon]);
@@ -298,7 +301,9 @@ export default function PokemonGame() {
             return {
               ...prev,
               timeLeft: 0,
-              isRevealed: true
+              isRevealed: true,
+              timeExpired: true,
+              wasCorrect: false
             };
           }
           return { ...prev, timeLeft: newTimeLeft };
@@ -396,7 +401,8 @@ export default function PokemonGame() {
           disabledChoices: allDisabled,
           userGuess: '',
           wasCorrect: false,
-          hint: ''  // Clear hint when revealed
+          hint: '',
+          timeExpired: false
         }));
       } else {
         // Set the wrong guess state
@@ -489,7 +495,8 @@ export default function PokemonGame() {
       disabledChoices: new Set(),
       wasCorrect: false,
       isQuickGuess: false,
-      isTransitioning: false
+      isTransitioning: false,
+      timeExpired: false
     });
   };
 
@@ -681,8 +688,10 @@ Try to beat my score at https://whos-that-pokemon-gold.vercel.app/ !
                     </div>
                   )}
                 </>
+              ) : gameState.timeExpired ? (
+                `Time's up! The Pokemon was ${formatPokemonName(gameState.pokemon.name)}!`
               ) : (
-                `Time's up! It's ${formatPokemonName(gameState.pokemon.name)}!`
+                `Out of guesses! The Pokemon was ${formatPokemonName(gameState.pokemon.name)}!`
               )}
             </div>
             {gameState.currentRoundIndex < ROUNDS_PER_GAME - 1 ? (
