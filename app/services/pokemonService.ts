@@ -159,8 +159,28 @@ export const fetchPokemon = async (id: number): Promise<Pokemon> => {
 
 export const fetchMultiplePokemon = async (ids: number[]): Promise<Pokemon[]> => {
   try {
-    const pokemons = await Promise.all(ids.map(id => fetchPokemon(id)));
-    return pokemons;
+    // Fetch all Pokemon in parallel with a single Promise.all
+    const fetchPromises = ids.map(id => {
+      const cached = getCachedPokemon(id);
+      if (cached) {
+        console.log(`Using cached data for Pokemon #${id}`);
+        return Promise.resolve(cached);
+      }
+      console.log(`Fetching Pokemon #${id} from API`);
+      return fetch(`${POKEMON_API_BASE_URL}/pokemon/${id}`)
+        .then(response => {
+          if (!response.ok) {
+            throw new Error(`Failed to fetch Pokemon: ${response.status}`);
+          }
+          return response.json();
+        })
+        .then(data => {
+          cachePokemon(id, data);
+          return data;
+        });
+    });
+
+    return Promise.all(fetchPromises);
   } catch (error) {
     console.error('Error fetching multiple Pokemon:', error);
     throw error;

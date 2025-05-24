@@ -57,10 +57,157 @@ const GAME_DURATION = 30; // seconds
 const NORMAL_MODE_GUESSES = 3;
 const EASY_MODE_GUESSES = 2;
 const ROUNDS_PER_GAME = 5;
-const REVEAL_DURATION = 2500; // 2.5 seconds to show the revealed Pokemon
+const REVEAL_DURATION = 1500; // 1.5 seconds to show the revealed Pokemon (reduced from 2.5s)
 const CONFETTI_DURATION = 2000; // 2 seconds for confetti
 const STORAGE_KEY_MODE = 'pokemon_game_mode';
 const STORAGE_KEY_DIFFICULTY = 'pokemon_game_difficulty';
+const CANVAS_WIDTH = 800;
+const CANVAS_HEIGHT = 600;
+const POKEMON_SIZE = 96;
+const PADDING = 40;
+const HEADER_HEIGHT = 120;
+const FOOTER_HEIGHT = 80;
+
+const generateSummaryImage = async (
+  username: string,
+  highScore: number,
+  mode: GameMode,
+  difficulty: Difficulty,
+  correctGuesses: Pokemon[]
+): Promise<string> => {
+  // Create canvas
+  const canvas = document.createElement('canvas') as HTMLCanvasElement;
+  canvas.width = CANVAS_WIDTH;
+  canvas.height = CANVAS_HEIGHT;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Could not get canvas context');
+
+  // Set background
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+  // Add gradient header with game theme colors
+  const headerGradient = ctx.createLinearGradient(0, 0, CANVAS_WIDTH, HEADER_HEIGHT);
+  headerGradient.addColorStop(0, '#48a4a8');  // custom-teal
+  headerGradient.addColorStop(0.5, '#d5c17c'); // custom-sand
+  headerGradient.addColorStop(1, '#d56373');  // custom-rose
+  ctx.fillStyle = headerGradient;
+  ctx.fillRect(0, 0, CANVAS_WIDTH, HEADER_HEIGHT);
+
+  // Add decorative Pokeball pattern in header
+  ctx.save();
+  ctx.globalAlpha = 0.1;
+  for (let x = -20; x < CANVAS_WIDTH + 20; x += 40) {
+    ctx.beginPath();
+    ctx.arc(x, HEADER_HEIGHT / 2, 15, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // Add title with shadow
+  ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+  ctx.shadowBlur = 10;
+  ctx.font = 'bold 40px system-ui';
+  ctx.textAlign = 'center';
+  ctx.fillText("🎮 Who's That Pokemon? 🎮", CANVAS_WIDTH / 2, 70);
+  ctx.shadowBlur = 0;
+
+  // Add trainer info
+  ctx.fillStyle = '#333333';
+  ctx.font = 'bold 28px system-ui';
+  ctx.textAlign = 'left';
+  ctx.fillText(`Trainer: ${username}`, PADDING, HEADER_HEIGHT + 50);
+  ctx.fillText(`High Score: ${highScore}`, PADDING, HEADER_HEIGHT + 90);
+
+  // Add game mode info with custom styling
+  const modeText = `${mode === 'classic' ? 'Classic (Gen 1)' : 'Modern'} - ${difficulty === 'easy' ? 'Easy' : 'Normal'}`;
+  ctx.font = '24px system-ui';
+  ctx.fillStyle = mode === 'classic' ? '#d56373' : '#48a4a8';
+  ctx.fillText(`Mode: ${modeText}`, PADDING, HEADER_HEIGHT + 130);
+
+  // Add Pokemon results header
+  ctx.fillStyle = '#333333';
+  ctx.font = 'bold 24px system-ui';
+  ctx.fillText(
+    `Correctly Guessed Pokemon (${correctGuesses.length}/${ROUNDS_PER_GAME}):`,
+    PADDING,
+    HEADER_HEIGHT + 180
+  );
+
+  // Load and draw Pokemon sprites
+  const loadImage = (url: string): Promise<HTMLImageElement> => {
+    return new Promise((resolve, reject) => {
+      const img = new window.Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error(`Failed to load image: ${url}`));
+      img.src = url;
+    });
+  };
+
+  // Draw Pokemon in a grid with more space
+  const startY = HEADER_HEIGHT + 200;
+  const pokemonPerRow = 3;
+  const promises = correctGuesses.map(async (pokemon, index) => {
+    try {
+      const row = Math.floor(index / pokemonPerRow);
+      const col = index % pokemonPerRow;
+      const x = PADDING + col * (POKEMON_SIZE + PADDING * 1.5);
+      const y = startY + row * (POKEMON_SIZE + PADDING);
+
+      // Draw Pokemon card background
+      ctx.fillStyle = '#f5f5f5';
+      ctx.beginPath();
+      ctx.roundRect(x - 10, y - 10, POKEMON_SIZE + 20, POKEMON_SIZE + 40, 10);
+      ctx.fill();
+
+      // Draw Pokemon sprite
+      if (pokemon.sprites.front_default) {
+        const img = await loadImage(pokemon.sprites.front_default);
+        ctx.drawImage(img, x, y, POKEMON_SIZE, POKEMON_SIZE);
+      }
+
+      // Draw Pokemon name with background
+      ctx.font = 'bold 16px system-ui';
+      ctx.fillStyle = '#333333';
+      ctx.textAlign = 'center';
+      const name = pokemon.name.charAt(0).toUpperCase() + pokemon.name.slice(1);
+      ctx.fillText(name, x + POKEMON_SIZE / 2, y + POKEMON_SIZE + 20);
+    } catch (error) {
+      console.error('Error loading Pokemon sprite:', error);
+    }
+  });
+
+  await Promise.all(promises);
+
+  // Add footer with gradient background
+  const footerGradient = ctx.createLinearGradient(0, CANVAS_HEIGHT - FOOTER_HEIGHT, CANVAS_WIDTH, CANVAS_HEIGHT);
+  footerGradient.addColorStop(0, '#f5f5f5');
+  footerGradient.addColorStop(1, '#e5e5e5');
+  ctx.fillStyle = footerGradient;
+  ctx.fillRect(0, CANVAS_HEIGHT - FOOTER_HEIGHT, CANVAS_WIDTH, FOOTER_HEIGHT);
+
+  // Add footer text with game URL
+  ctx.font = 'bold 18px system-ui';
+  ctx.fillStyle = '#666666';
+  ctx.textAlign = 'center';
+  ctx.fillText(
+    'Try to beat my score at:',
+    CANVAS_WIDTH / 2,
+    CANVAS_HEIGHT - FOOTER_HEIGHT + 30
+  );
+  ctx.font = 'bold 20px system-ui';
+  ctx.fillStyle = '#48a4a8';
+  ctx.fillText(
+    'https://whos-that-pokemon-gold.vercel.app/',
+    CANVAS_WIDTH / 2,
+    CANVAS_HEIGHT - FOOTER_HEIGHT + 60
+  );
+
+  return canvas.toDataURL('image/png');
+};
 
 export default function PokemonGame() {
   const getInitialGuesses = (difficulty: Difficulty) => {
@@ -228,41 +375,32 @@ export default function PokemonGame() {
       return;
     }
 
-    // First set loading state
+    const nextRound = gameState.prefetchedPokemon[nextIndex];
+    if (!nextRound) {
+      console.error('No data for next round:', nextIndex);
+      setShowSummary(true);
+      return;
+    }
+
+    // Set new round data immediately without setTimeout
     setGameState(prev => ({
       ...prev,
-      isLoading: true,
-      choices: [], // Clear choices while loading
+      pokemon: nextRound.pokemon,
+      choices: nextRound.choices || [],
+      currentRoundIndex: nextIndex,
+      isLoading: false,
+      isRevealed: false,
+      userGuess: '',
+      timeLeft: GAME_DURATION,
+      guessesLeft: getInitialGuesses(prev.difficulty),
+      hint: '',
+      isWrongGuess: false,
+      shakingGuess: null,
+      disabledChoices: new Set(),
+      isQuickGuess: false,
+      isTransitioning: false,
+      timeExpired: false
     }));
-
-    // Then in the next tick, set the new round data
-    setTimeout(() => {
-      const nextRound = gameState.prefetchedPokemon[nextIndex];
-      if (!nextRound) {
-        console.error('No data for next round:', nextIndex);
-        setShowSummary(true);
-        return;
-      }
-
-      setGameState(prev => ({
-        ...prev,
-        pokemon: nextRound.pokemon,
-        choices: nextRound.choices || [],
-        currentRoundIndex: nextIndex,
-        isLoading: false,
-        isRevealed: false,
-        userGuess: '',
-        timeLeft: GAME_DURATION,
-        guessesLeft: getInitialGuesses(prev.difficulty),
-        hint: '',
-        isWrongGuess: false,
-        shakingGuess: null,
-        disabledChoices: new Set(),
-        isQuickGuess: false,
-        isTransitioning: false,
-        timeExpired: false
-      }));
-    }, 0);
   }, [gameState.currentRoundIndex, gameState.prefetchedPokemon]);
 
   const finishRound = useCallback(() => {
@@ -512,25 +650,45 @@ export default function PokemonGame() {
     return inProgress;
   };
 
-  const handleShare = (username: string) => {
-    // Create a sharable text summary
-    const summary = `
+  const handleShare = async (username: string) => {
+    try {
+      const finalUsername = username || 'Anonymous Trainer';
+      const imageUrl = await generateSummaryImage(
+        finalUsername,
+        gameState.highScore,
+        gameState.mode,
+        gameState.difficulty,
+        gameState.correctGuesses
+      );
+
+      // Create a temporary link to download the image
+      const link = document.createElement('a');
+      link.href = imageUrl;
+      link.download = 'pokemon-game-results.png';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error('Error generating summary image:', error);
+      // Fallback to text summary
+      const summary = `
 🎮 Pokemon Guessing Game Results 🎮
-Trainer: ${username}
+Trainer: ${username || 'Anonymous Trainer'}
 High Score: ${gameState.highScore}
 Mode: ${gameState.mode === 'classic' ? 'Classic (Gen 1)' : 'Modern'} - ${gameState.difficulty === 'easy' ? 'Easy' : 'Normal'}
 Correctly Guessed Pokemon (${gameState.correctGuesses.length}/${ROUNDS_PER_GAME}):
 ${gameState.correctGuesses.map(p => p.name.charAt(0).toUpperCase() + p.name.slice(1)).join(', ')}
 Try to beat my score at https://whos-that-pokemon-gold.vercel.app/ !
-    `.trim();
+      `.trim();
 
-    // Copy to clipboard
-    navigator.clipboard.writeText(summary).then(() => {
-      alert('Summary copied to clipboard! Share it with your friends!');
-    }).catch(() => {
-      alert('Failed to copy to clipboard. Please copy the text manually.');
-      console.log(summary);
-    });
+      // Try to copy to clipboard as fallback
+      navigator.clipboard.writeText(summary).then(() => {
+        alert('Could not generate image. Summary copied to clipboard instead!');
+      }).catch(() => {
+        alert('Could not generate image or copy to clipboard. Please copy the text manually.');
+        console.log(summary);
+      });
+    }
   };
 
   if (gameState.isLoading || !gameState.pokemon || (gameState.difficulty === 'easy' && !gameState.choices.length)) {
