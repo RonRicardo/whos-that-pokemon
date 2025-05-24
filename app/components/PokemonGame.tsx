@@ -107,16 +107,40 @@ export default function PokemonGame() {
       if (gameState.difficulty === 'easy') {
         let result: { correct: Pokemon; choices: Pokemon[] };
         let validChoices = false;
-        while (!validChoices) {
-          result = await fetchRandomPokemonWithChoices(gameState.mode);
-          validChoices = result.choices.every(pokemon => 
-            pokemon.sprites.front_default && pokemon.sprites.back_default
-          );
+        let retryCount = 0;
+        const MAX_RETRIES = 3;
+
+        while (!validChoices && retryCount < MAX_RETRIES) {
+          try {
+            result = await fetchRandomPokemonWithChoices(gameState.mode);
+            validChoices = result.choices.every(pokemon => 
+              pokemon.sprites.front_default && pokemon.sprites.back_default
+            );
+            if (!validChoices) {
+              retryCount++;
+              console.log(`Retry ${retryCount}: Some Pokemon missing sprites`);
+            }
+          } catch (error) {
+            retryCount++;
+            console.error(`Retry ${retryCount} failed:`, error);
+          }
         }
+
+        // If we couldn't get valid choices after retries, fallback to normal mode
+        if (!validChoices) {
+          console.error('Failed to load valid choices after retries, falling back to normal mode');
+          setGameState(prev => ({
+            ...prev,
+            difficulty: 'normal',
+            isLoading: false
+          }));
+          return;
+        }
+
         setGameState(prev => ({
           ...prev,
-          pokemon: result.correct,
-          choices: result.choices,
+          pokemon: result!.correct,
+          choices: result!.choices,
           isLoading: false,
           isRevealed: false,
           userGuess: '',
@@ -129,9 +153,26 @@ export default function PokemonGame() {
         }));
       } else {
         let pokemon = await fetchRandomPokemon(gameState.mode);
-        while (!pokemon.sprites.front_default || !pokemon.sprites.back_default) {
+        let retryCount = 0;
+        const MAX_RETRIES = 3;
+
+        while ((!pokemon.sprites.front_default || !pokemon.sprites.back_default) && retryCount < MAX_RETRIES) {
+          retryCount++;
+          console.log(`Retry ${retryCount}: Pokemon missing sprites`);
           pokemon = await fetchRandomPokemon(gameState.mode);
         }
+
+        // If we still don't have valid sprites, show an error state
+        if (!pokemon.sprites.front_default || !pokemon.sprites.back_default) {
+          console.error('Failed to load Pokemon with valid sprites');
+          setGameState(prev => ({ 
+            ...prev, 
+            isLoading: false,
+            pokemon: null
+          }));
+          return;
+        }
+
         setGameState(prev => ({
           ...prev,
           pokemon,
