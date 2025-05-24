@@ -521,7 +521,9 @@ Try to beat my score at https://whos-that-pokemon-gold.vercel.app/ !
           </div>
         ) : gameState.difficulty === 'easy' ? (
           <div className="grid grid-cols-1 gap-4 w-full max-w-md">
-            {gameState.choices.length > 0 ? (
+            {gameState.isLoading ? (
+              <div className="text-center text-custom-brown">Loading choices...</div>
+            ) : gameState.choices.length > 0 ? (
               gameState.choices.map((choice) => {
                 const isIncorrect = gameState.incorrectGuesses.has(choice.name);
                 const isShaking = choice.name === gameState.shakingGuess;
@@ -533,7 +535,7 @@ Try to beat my score at https://whos-that-pokemon-gold.vercel.app/ !
                       ${isIncorrect ? 'bg-gray-400 hover:bg-gray-400 text-gray-600' : 'bg-custom-teal hover:bg-opacity-90 text-white'}
                       ${isShaking ? 'animate-shake' : ''}
                     `}
-                    disabled={isIncorrect}
+                    disabled={isIncorrect || gameState.isLoading}
                   >
                     {formatPokemonName(choice.name)}
                   </button>
@@ -547,7 +549,9 @@ Try to beat my score at https://whos-that-pokemon-gold.vercel.app/ !
           <form 
             onSubmit={(e) => { 
               e.preventDefault(); 
-              handleGuess(gameState.userGuess); 
+              if (!gameState.isLoading) {
+                handleGuess(gameState.userGuess); 
+              }
             }} 
             className="flex flex-col items-center gap-4 w-full max-w-md"
           >
@@ -559,11 +563,15 @@ Try to beat my score at https://whos-that-pokemon-gold.vercel.app/ !
               className={`w-full px-4 py-2 border-2 border-custom-teal rounded-lg focus:outline-none focus:border-custom-brown transition-all ${
                 gameState.isWrongGuess ? 'animate-shake' : ''
               }`}
+              disabled={gameState.isLoading}
               autoFocus
             />
             <button
               type="submit"
-              className="w-full bg-custom-teal hover:bg-opacity-90 text-white font-bold py-2 px-6 rounded-full transition-all"
+              className={`w-full bg-custom-teal hover:bg-opacity-90 text-white font-bold py-2 px-6 rounded-full transition-all ${
+                gameState.isLoading ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
+              disabled={gameState.isLoading}
             >
               Guess!
             </button>
