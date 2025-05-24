@@ -3,7 +3,13 @@
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import ReactConfetti from 'react-confetti';
-import { fetchRandomPokemon, type Pokemon, type GameMode } from '../services/pokemonService';
+import { 
+  fetchRandomPokemon, 
+  fetchRandomPokemonWithChoices,
+  type Pokemon, 
+  type GameMode,
+  type Difficulty 
+} from '../services/pokemonService';
 import Modal from './Modal';
 
 interface GameState {
@@ -17,12 +23,15 @@ interface GameState {
   isWrongGuess: boolean;
   hint: string;
   mode: GameMode;
+  difficulty: Difficulty;
   showConfetti: boolean;
+  choices: Pokemon[];
 }
 
 interface ModeSwitchModal {
   isOpen: boolean;
   targetMode: GameMode | null;
+  targetDifficulty: Difficulty | null;
 }
 
 export default function PokemonGame() {
@@ -38,12 +47,15 @@ export default function PokemonGame() {
     isWrongGuess: false,
     hint: '',
     mode: 'modern',
-    showConfetti: false
+    difficulty: 'normal',
+    showConfetti: false,
+    choices: []
   });
 
   const [modeSwitchModal, setModeSwitchModal] = useState<ModeSwitchModal>({
     isOpen: false,
-    targetMode: null
+    targetMode: null,
+    targetDifficulty: null
   });
 
   const [windowSize, setWindowSize] = useState({
@@ -91,36 +103,64 @@ export default function PokemonGame() {
     return `Hint: This Pokemon's name ${name.length > 6 ? 'has ' + name.length + ' letters' : 'starts with ' + name[0].toUpperCase()}`;
   };
 
+  const formatPokemonName = (name: string): string => {
+    // Handle hyphenated names
+    return name.split('-')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join('-');
+  };
+
   const loadNewPokemon = async () => {
     try {
-      let pokemon = await fetchRandomPokemon(gameState.mode);
-      // Keep trying until we find a Pokemon with both sprites
-      while (!pokemon.sprites.front_default || !pokemon.sprites.back_default) {
-        pokemon = await fetchRandomPokemon(gameState.mode);
+      if (gameState.difficulty === 'easy') {
+        let result;
+        do {
+          result = await fetchRandomPokemonWithChoices(gameState.mode);
+        } while (!result.correct.sprites.front_default || !result.correct.sprites.back_default);
+
+        console.log('Loaded Pokemon with choices:', result); // Debug log
+
+        setGameState(prev => ({
+          ...prev,
+          pokemon: result.correct,
+          choices: result.choices,
+          isLoading: false,
+          isRevealed: false,
+          userGuess: '',
+          timeLeft: GAME_DURATION,
+          guessesLeft: 3,
+          hint: '',
+          isWrongGuess: false
+        }));
+      } else {
+        let pokemon = await fetchRandomPokemon(gameState.mode);
+        while (!pokemon.sprites.front_default || !pokemon.sprites.back_default) {
+          pokemon = await fetchRandomPokemon(gameState.mode);
+        }
+        
+        setGameState(prev => ({
+          ...prev,
+          pokemon,
+          choices: [],
+          isLoading: false,
+          isRevealed: false,
+          userGuess: '',
+          timeLeft: GAME_DURATION,
+          guessesLeft: 3,
+          hint: '',
+          isWrongGuess: false
+        }));
       }
-      
-      setGameState(prev => ({
-        ...prev,
-        pokemon,
-        isLoading: false,
-        isRevealed: false,
-        userGuess: '',
-        timeLeft: GAME_DURATION,
-        guessesLeft: 3,
-        hint: '',
-        isWrongGuess: false
-      }));
     } catch (error) {
       console.error('Failed to load Pokemon:', error);
       setGameState(prev => ({ ...prev, isLoading: false }));
     }
   };
 
-  const handleGuess = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleGuess = (guess: string) => {
     if (!gameState.pokemon) return;
 
-    const isCorrect = gameState.userGuess.toLowerCase() === gameState.pokemon.name.toLowerCase();
+    const isCorrect = guess.toLowerCase() === gameState.pokemon.name.toLowerCase();
     
     if (isCorrect) {
       setGameState(prev => ({
@@ -130,7 +170,6 @@ export default function PokemonGame() {
         showConfetti: true
       }));
 
-      // Stop confetti after 5 seconds
       setTimeout(() => {
         setGameState(prev => ({ ...prev, showConfetti: false }));
       }, 5000);
@@ -145,19 +184,39 @@ export default function PokemonGame() {
         isRevealed: newGuessesLeft === 0
       }));
 
-      // Reset shake animation after a short delay
       setTimeout(() => {
         setGameState(prev => ({ ...prev, isWrongGuess: false }));
       }, 500);
     }
   };
 
-  const handleNextPokemon = () => {
-    setGameState(prev => ({ ...prev, showConfetti: false }));
-    loadNewPokemon();
+  const handleModeSwitch = (newMode: GameMode, newDifficulty: Difficulty) => {
+    console.log('Handling mode switch:', { newMode, newDifficulty, currentMode: gameState.mode });
+    if (gameState.mode === newMode && gameState.difficulty === newDifficulty) return;
+
+    if (isGameInProgress()) {
+      console.log('Opening modal for mode switch');
+      setModeSwitchModal({
+        isOpen: true,
+        targetMode: newMode,
+        targetDifficulty: newDifficulty
+      });
+    } else {
+      console.log('Switching mode immediately');
+      resetGameState(newMode, newDifficulty);
+      loadNewPokemon();
+    }
   };
 
-  const resetGameState = (newMode: GameMode) => {
+  const confirmModeSwitch = () => {
+    console.log('Confirming mode switch to:', modeSwitchModal.targetMode);
+    if (modeSwitchModal.targetMode && modeSwitchModal.targetDifficulty) {
+      resetGameState(modeSwitchModal.targetMode, modeSwitchModal.targetDifficulty);
+      loadNewPokemon();
+    }
+  };
+
+  const resetGameState = (newMode: GameMode, newDifficulty: Difficulty) => {
     // First clear any existing timers by setting isRevealed to true
     setGameState(prev => ({ ...prev, isRevealed: true }));
 
@@ -173,7 +232,9 @@ export default function PokemonGame() {
       isWrongGuess: false,
       hint: '',
       mode: newMode,
-      showConfetti: false
+      difficulty: newDifficulty,
+      showConfetti: false,
+      choices: []
     });
   };
 
@@ -187,31 +248,6 @@ export default function PokemonGame() {
       GAME_DURATION
     });
     return inProgress;
-  };
-
-  const handleModeSwitch = (newMode: GameMode) => {
-    console.log('Handling mode switch:', { newMode, currentMode: gameState.mode });
-    if (gameState.mode === newMode) return;
-
-    if (isGameInProgress()) {
-      console.log('Opening modal for mode switch');
-      setModeSwitchModal({
-        isOpen: true,
-        targetMode: newMode
-      });
-    } else {
-      console.log('Switching mode immediately');
-      resetGameState(newMode);
-      loadNewPokemon();
-    }
-  };
-
-  const confirmModeSwitch = () => {
-    console.log('Confirming mode switch to:', modeSwitchModal.targetMode);
-    if (modeSwitchModal.targetMode) {
-      resetGameState(modeSwitchModal.targetMode);
-      loadNewPokemon();
-    }
   };
 
   if (gameState.isLoading || !gameState.pokemon) {
@@ -228,7 +264,7 @@ export default function PokemonGame() {
         isOpen={modeSwitchModal.isOpen}
         onClose={() => {
           console.log('Closing modal');
-          setModeSwitchModal({ isOpen: false, targetMode: null });
+          setModeSwitchModal({ isOpen: false, targetMode: null, targetDifficulty: null });
         }}
         onConfirm={confirmModeSwitch}
         title="Switch Game Mode?"
@@ -249,27 +285,51 @@ export default function PokemonGame() {
           />
         )}
         
-        <div className="flex gap-4 mb-4">
-          <button
-            onClick={() => handleModeSwitch('classic')}
-            className={`px-4 py-2 rounded-full transition-all ${
-              gameState.mode === 'classic'
-                ? 'bg-custom-rose text-white'
-                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-            }`}
-          >
-            Classic Mode (Gen 1)
-          </button>
-          <button
-            onClick={() => handleModeSwitch('modern')}
-            className={`px-4 py-2 rounded-full transition-all ${
-              gameState.mode === 'modern'
-                ? 'bg-custom-teal text-white'
-                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-            }`}
-          >
-            Modern Mode (All Gens)
-          </button>
+        <div className="flex flex-col gap-4 mb-4">
+          <div className="flex gap-4 justify-center">
+            <button
+              onClick={() => handleModeSwitch('classic', gameState.difficulty)}
+              className={`px-4 py-2 rounded-full transition-all ${
+                gameState.mode === 'classic'
+                  ? 'bg-custom-rose text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              Classic Mode (Gen 1)
+            </button>
+            <button
+              onClick={() => handleModeSwitch('modern', gameState.difficulty)}
+              className={`px-4 py-2 rounded-full transition-all ${
+                gameState.mode === 'modern'
+                  ? 'bg-custom-teal text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              Modern Mode (All Gens)
+            </button>
+          </div>
+          <div className="flex gap-4 justify-center">
+            <button
+              onClick={() => handleModeSwitch(gameState.mode, 'easy')}
+              className={`px-4 py-2 rounded-full transition-all ${
+                gameState.difficulty === 'easy'
+                  ? 'bg-custom-green text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              Easy Mode
+            </button>
+            <button
+              onClick={() => handleModeSwitch(gameState.mode, 'normal')}
+              className={`px-4 py-2 rounded-full transition-all ${
+                gameState.difficulty === 'normal'
+                  ? 'bg-custom-brown text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              Normal Mode
+            </button>
+          </div>
         </div>
 
         <div className="relative w-64 h-64 bg-gray-100 rounded-lg overflow-hidden">
@@ -313,30 +373,50 @@ export default function PokemonGame() {
         {gameState.isRevealed ? (
           <div className="flex flex-col items-center gap-4">
             <div className="text-2xl font-bold text-custom-brown">
-              It&apos;s {gameState.pokemon.name.toUpperCase()}!
+              It&apos;s {formatPokemonName(gameState.pokemon.name)}!
             </div>
             <button
-              onClick={handleNextPokemon}
+              onClick={loadNewPokemon}
               className="bg-custom-teal hover:bg-opacity-90 text-white font-bold py-2 px-6 rounded-full transition-all"
             >
               Next Pokemon
             </button>
           </div>
+        ) : gameState.difficulty === 'easy' ? (
+          <div className="grid grid-cols-1 gap-4 w-full max-w-md">
+            {gameState.choices.map((choice) => (
+              <button
+                key={choice.id}
+                onClick={() => handleGuess(choice.name)}
+                className={`w-full px-6 py-3 rounded-full transition-all ${
+                  gameState.isWrongGuess ? 'animate-shake' : ''
+                } bg-custom-teal hover:bg-opacity-90 text-white font-bold text-lg`}
+              >
+                {formatPokemonName(choice.name)}
+              </button>
+            ))}
+          </div>
         ) : (
-          <form onSubmit={handleGuess} className="flex flex-col items-center gap-4">
+          <form 
+            onSubmit={(e) => { 
+              e.preventDefault(); 
+              handleGuess(gameState.userGuess); 
+            }} 
+            className="flex flex-col items-center gap-4 w-full max-w-md"
+          >
             <input
               type="text"
               value={gameState.userGuess}
               onChange={(e) => setGameState(prev => ({ ...prev, userGuess: e.target.value }))}
               placeholder="Who's that Pokemon?"
-              className={`px-4 py-2 border-2 border-custom-teal rounded-lg focus:outline-none focus:border-custom-brown transition-all ${
+              className={`w-full px-4 py-2 border-2 border-custom-teal rounded-lg focus:outline-none focus:border-custom-brown transition-all ${
                 gameState.isWrongGuess ? 'animate-shake' : ''
               }`}
               autoFocus
             />
             <button
               type="submit"
-              className="bg-custom-teal hover:bg-opacity-90 text-white font-bold py-2 px-6 rounded-full transition-all"
+              className="w-full bg-custom-teal hover:bg-opacity-90 text-white font-bold py-2 px-6 rounded-full transition-all"
             >
               Guess!
             </button>
