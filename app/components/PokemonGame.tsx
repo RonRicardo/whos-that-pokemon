@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import ReactConfetti from 'react-confetti';
 import { 
@@ -98,9 +98,64 @@ export default function PokemonGame() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  const loadNewPokemon = useCallback(async () => {
+    if (gameState.roundsPlayed >= ROUNDS_PER_GAME) {
+      return;
+    }
+    setGameState(prev => ({ ...prev, isLoading: true }));
+    try {
+      if (gameState.difficulty === 'easy') {
+        let result: { correct: Pokemon; choices: Pokemon[] };
+        let validChoices = false;
+        while (!validChoices) {
+          result = await fetchRandomPokemonWithChoices(gameState.mode);
+          validChoices = result.choices.every(pokemon => 
+            pokemon.sprites.front_default && pokemon.sprites.back_default
+          );
+        }
+        setGameState(prev => ({
+          ...prev,
+          pokemon: result.correct,
+          choices: result.choices,
+          isLoading: false,
+          isRevealed: false,
+          userGuess: '',
+          timeLeft: GAME_DURATION,
+          guessesLeft: EASY_MODE_GUESSES,
+          hint: '',
+          isWrongGuess: false,
+          incorrectGuesses: new Set(),
+          shakingGuess: null
+        }));
+      } else {
+        let pokemon = await fetchRandomPokemon(gameState.mode);
+        while (!pokemon.sprites.front_default || !pokemon.sprites.back_default) {
+          pokemon = await fetchRandomPokemon(gameState.mode);
+        }
+        setGameState(prev => ({
+          ...prev,
+          pokemon,
+          choices: [],
+          isLoading: false,
+          isRevealed: false,
+          userGuess: '',
+          timeLeft: GAME_DURATION,
+          guessesLeft: NORMAL_MODE_GUESSES,
+          hint: '',
+          isWrongGuess: false,
+          incorrectGuesses: new Set(),
+          shakingGuess: null
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to load Pokemon:', error);
+      setGameState(prev => ({ ...prev, isLoading: false }));
+    }
+  }, [gameState.difficulty, gameState.mode, gameState.roundsPlayed]);
+
   useEffect(() => {
     loadNewPokemon();
-  }, []);
+  }, [loadNewPokemon]);
 
   useEffect(() => {
     let timer: NodeJS.Timeout | null = null;
@@ -137,73 +192,6 @@ export default function PokemonGame() {
     return name.split('-')
       .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
       .join('-');
-  };
-
-  const loadNewPokemon = async () => {
-    // Don't load new Pokemon if the game is complete
-    if (gameState.roundsPlayed >= ROUNDS_PER_GAME) {
-      return;
-    }
-
-    setGameState(prev => ({ ...prev, isLoading: true }));
-    
-    try {
-      if (gameState.difficulty === 'easy') {
-        let result: { correct: Pokemon; choices: Pokemon[] };
-        let validChoices = false;
-        
-        while (!validChoices) {
-          result = await fetchRandomPokemonWithChoices(gameState.mode);
-          // Check if all Pokemon in choices (including correct) have both sprites
-          validChoices = result.choices.every(pokemon => 
-            pokemon.sprites.front_default && pokemon.sprites.back_default
-          );
-          console.log('Fetched result:', {
-            correct: result.correct.name,
-            choices: result.choices.map(c => c.name),
-            validChoices
-          });
-        }
-
-        setGameState(prev => ({
-          ...prev,
-          pokemon: result.correct,
-          choices: result.choices,
-          isLoading: false,
-          isRevealed: false,
-          userGuess: '',
-          timeLeft: GAME_DURATION,
-          guessesLeft: EASY_MODE_GUESSES,
-          hint: '',
-          isWrongGuess: false,
-          incorrectGuesses: new Set(),
-          shakingGuess: null
-        }));
-      } else {
-        let pokemon = await fetchRandomPokemon(gameState.mode);
-        while (!pokemon.sprites.front_default || !pokemon.sprites.back_default) {
-          pokemon = await fetchRandomPokemon(gameState.mode);
-        }
-        
-        setGameState(prev => ({
-          ...prev,
-          pokemon,
-          choices: [],
-          isLoading: false,
-          isRevealed: false,
-          userGuess: '',
-          timeLeft: GAME_DURATION,
-          guessesLeft: NORMAL_MODE_GUESSES,
-          hint: '',
-          isWrongGuess: false,
-          incorrectGuesses: new Set(),
-          shakingGuess: null
-        }));
-      }
-    } catch (error) {
-      console.error('Failed to load Pokemon:', error);
-      setGameState(prev => ({ ...prev, isLoading: false }));
-    }
   };
 
   const handleGuess = (guess: string) => {
