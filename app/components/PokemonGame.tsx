@@ -55,10 +55,34 @@ const EASY_MODE_GUESSES = 2;
 const ROUNDS_PER_GAME = 5;
 const REVEAL_DURATION = 2500; // 2.5 seconds to show the revealed Pokemon
 const CONFETTI_DURATION = 2000; // 2 seconds for confetti
+const STORAGE_KEY_MODE = 'pokemon_game_mode';
+const STORAGE_KEY_DIFFICULTY = 'pokemon_game_difficulty';
 
 export default function PokemonGame() {
   const getInitialGuesses = (difficulty: Difficulty) => {
     return difficulty === 'easy' ? EASY_MODE_GUESSES : NORMAL_MODE_GUESSES;
+  };
+
+  const getStoredMode = (): GameMode => {
+    if (typeof window === 'undefined') return 'modern';
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY_MODE);
+      return (stored === 'classic' || stored === 'modern') ? stored : 'modern';
+    } catch (error) {
+      console.warn('Error reading stored mode:', error);
+      return 'modern';
+    }
+  };
+
+  const getStoredDifficulty = (): Difficulty => {
+    if (typeof window === 'undefined') return 'normal';
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY_DIFFICULTY);
+      return (stored === 'easy' || stored === 'normal') ? stored : 'normal';
+    } catch (error) {
+      console.warn('Error reading stored difficulty:', error);
+      return 'normal';
+    }
   };
 
   const [gameState, setGameState] = useState<GameState>({
@@ -72,8 +96,8 @@ export default function PokemonGame() {
     guessesLeft: NORMAL_MODE_GUESSES,
     isWrongGuess: false,
     hint: '',
-    mode: 'modern',
-    difficulty: 'normal',
+    mode: getStoredMode(),
+    difficulty: getStoredDifficulty(),
     showConfetti: false,
     choices: [],
     incorrectGuesses: new Set(),
@@ -343,6 +367,15 @@ export default function PokemonGame() {
     }
   };
 
+  const saveGameMode = useCallback((mode: GameMode, difficulty: Difficulty) => {
+    try {
+      localStorage.setItem(STORAGE_KEY_MODE, mode);
+      localStorage.setItem(STORAGE_KEY_DIFFICULTY, difficulty);
+    } catch (error) {
+      console.warn('Error saving game mode:', error);
+    }
+  }, []);
+
   const handleModeSwitch = (newMode: GameMode, newDifficulty: Difficulty) => {
     console.log('Handling mode switch:', { newMode, newDifficulty, currentMode: gameState.mode });
     if (gameState.mode === newMode && gameState.difficulty === newDifficulty) return;
@@ -356,6 +389,7 @@ export default function PokemonGame() {
       });
     } else {
       console.log('Switching mode immediately');
+      saveGameMode(newMode, newDifficulty);
       resetGameState(newMode, newDifficulty);
       prefetchPokemonForGame(newMode, newDifficulty);
     }
@@ -364,6 +398,7 @@ export default function PokemonGame() {
   const confirmModeSwitch = () => {
     console.log('Confirming mode switch to:', modeSwitchModal.targetMode);
     if (modeSwitchModal.targetMode && modeSwitchModal.targetDifficulty) {
+      saveGameMode(modeSwitchModal.targetMode, modeSwitchModal.targetDifficulty);
       resetGameState(modeSwitchModal.targetMode, modeSwitchModal.targetDifficulty);
       prefetchPokemonForGame(modeSwitchModal.targetMode, modeSwitchModal.targetDifficulty);
     }
