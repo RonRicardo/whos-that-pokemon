@@ -1,3 +1,4 @@
+import { Analytics } from "@vercel/analytics/next"
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
@@ -26,6 +27,7 @@ export default function RootLayout({
         <main className="container mx-auto p-4">
           <div className="bg-white rounded-lg shadow-xl p-6 min-h-[calc(100vh-12rem)]">
             {children}
+            <Analytics/>
           </div>
         </main>
 
