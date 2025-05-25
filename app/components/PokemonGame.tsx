@@ -935,6 +935,7 @@ Try to beat my score at https://whos-that-pokemon-gold.vercel.app/ !
               }`}
               disabled={gameState.isLoading}
               autoFocus
+              maxLength={15}
             />
             <button
               type="submit"
