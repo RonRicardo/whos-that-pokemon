@@ -932,7 +932,7 @@ Try to beat my score at https://whos-that-pokemon-gold.vercel.app/ !
               placeholder="Who's that Pokemon?"
               className={`w-full px-4 py-2 border-2 border-custom-teal rounded-lg focus:outline-none focus:border-custom-brown transition-all ${
                 gameState.isWrongGuess ? 'animate-shake' : ''
-              }`}
+              } text-black `}
               disabled={gameState.isLoading}
               autoFocus
               maxLength={15}
